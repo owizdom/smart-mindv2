@@ -3,24 +3,34 @@ import {
   AgentState,
   Pheromone,
   PheromoneChannel,
+  AutonomousAgentState,
+  AgentPersonality,
+  AgentThought,
+  AgentDecision,
+  EngineeringPheromone,
+  GitHubRepo,
+  GitHubIssue,
   hash,
 } from "./types";
 import { discoverFromWeb, crossPollinateFromWeb } from "./scraper";
+import { discoverRepos, getTrendingRepos, getActionableIssues } from "./github";
+import { formThought, synthesizeKnowledge } from "./thinker";
+import {
+  generateCandidateDecisions,
+  selectDecision,
+  shouldSwitch,
+} from "./decider";
+import { executeDecision } from "./executor";
+import { saveThought, saveDecision, updateDecisionStatus } from "./persistence";
 
 /**
  * Individual Swarm Agent — runs in its own TEE.
  *
- * Each agent AUTONOMOUSLY scours the internet for knowledge.
- * No API keys. No LLM. Pure web discovery.
+ * v2: Agents autonomously browse GitHub, study repos, form engineering
+ * thoughts, decide what to build/fix/contribute, and execute code changes.
  *
- * Sources: Wikipedia, ArXiv, Hacker News — all free, no auth.
- *
- * The agent explores its domain, fetches real knowledge from
- * the web, drops pheromones, picks up others', and searches
- * the internet for cross-domain connections.
- *
- * Above a critical pheromone density, agents spontaneously
- * synchronize — collective intelligence emerges.
+ * Progressive engagement: starts with exploration (v1), ramps into
+ * engineering mode as knowledge builds.
  */
 
 const DOMAINS = [
@@ -41,15 +51,46 @@ const NAMES = [
   "Neuron-E", "Neuron-F", "Neuron-G", "Neuron-H",
 ];
 
+// Personality presets
+const PERSONALITY_PRESETS: Array<{ name: string; personality: AgentPersonality }> = [
+  { name: "Explorer",     personality: { curiosity: 0.9, diligence: 0.4, boldness: 0.3, sociability: 0.6 } },
+  { name: "Fixer",        personality: { curiosity: 0.3, diligence: 0.9, boldness: 0.7, sociability: 0.4 } },
+  { name: "Builder",      personality: { curiosity: 0.5, diligence: 0.6, boldness: 0.9, sociability: 0.3 } },
+  { name: "Synthesizer",  personality: { curiosity: 0.7, diligence: 0.5, boldness: 0.4, sociability: 0.9 } },
+  { name: "Generalist",   personality: { curiosity: 0.6, diligence: 0.6, boldness: 0.6, sociability: 0.6 } },
+  { name: "Pioneer",      personality: { curiosity: 0.8, diligence: 0.3, boldness: 0.9, sociability: 0.5 } },
+];
+
+function generatePersonality(index: number): { specialization: string; personality: AgentPersonality } {
+  const preset = PERSONALITY_PRESETS[index % PERSONALITY_PRESETS.length];
+  // Add slight random perturbation for uniqueness
+  const perturb = () => Math.max(0, Math.min(1, (Math.random() - 0.5) * 0.1));
+  return {
+    specialization: preset.name,
+    personality: {
+      curiosity: Math.max(0, Math.min(1, preset.personality.curiosity + perturb())),
+      diligence: Math.max(0, Math.min(1, preset.personality.diligence + perturb())),
+      boldness: Math.max(0, Math.min(1, preset.personality.boldness + perturb())),
+      sociability: Math.max(0, Math.min(1, preset.personality.sociability + perturb())),
+    },
+  };
+}
+
 export class SwarmAgent {
-  state: AgentState;
+  state: AutonomousAgentState;
   private explored: Set<string> = new Set(); // topics already fetched from web
+  private discoveredRepos: GitHubRepo[] = [];
+  private discoveredIssues: GitHubIssue[] = [];
+  private engineeringEnabled: boolean = false;
 
   constructor(index: number) {
     const angle = (index / 8) * Math.PI * 2;
     const radius = 300 + Math.random() * 200;
+    const { specialization, personality } = generatePersonality(index);
+    const tokenBudget = parseInt(process.env.TOKEN_BUDGET_PER_AGENT || "50000");
 
     this.state = {
+      // Base AgentState
       id: uuid(),
       name: NAMES[index] || `Neuron-${index}`,
       position: {
@@ -69,7 +110,34 @@ export class SwarmAgent {
       stepCount: 0,
       discoveries: 0,
       contributionsToCollective: 0,
+
+      // AutonomousAgentState extensions
+      thoughts: [],
+      decisions: [],
+      currentDecision: null,
+      reposStudied: [],
+      prsCreated: [],
+      tokensUsed: 0,
+      tokenBudget,
+      specialization,
+      personality,
+      currentAction: "initializing",
     };
+  }
+
+  enableEngineering(): void {
+    this.engineeringEnabled = true;
+  }
+
+  /** Determine if this step should be engineering vs exploration */
+  private shouldDoEngineering(): boolean {
+    if (!this.engineeringEnabled) return false;
+    if (this.state.tokensUsed >= this.state.tokenBudget) return false;
+
+    // Ramp: 0% at step 0, ~20% at step 5, ~50% at step 20, ~80% at step 40
+    const step = this.state.stepCount;
+    const probability = Math.min(0.8, step / 50);
+    return Math.random() < probability;
   }
 
   /** One exploration step */
@@ -82,13 +150,214 @@ export class SwarmAgent {
     // 2. Absorb nearby pheromones from other agents
     const absorbed = this.absorbPheromones(channel);
 
-    // 3. Explore — scour the internet for knowledge
-    const discovery = await this.explore(absorbed);
+    // 3. Branch: engineering mode or exploration mode
+    let discovery: Pheromone | null = null;
+
+    if (this.shouldDoEngineering()) {
+      // Continue multi-step execution if we have an active decision
+      if (this.state.currentDecision && this.state.currentDecision.status === "executing") {
+        discovery = await this.continueExecution(absorbed);
+      } else {
+        discovery = await this.engineeringStep(channel, absorbed);
+      }
+    } else {
+      // Classic exploration mode
+      discovery = await this.explore(absorbed);
+    }
 
     // 4. Check for synchronization
     this.checkSync(channel);
 
     return discovery;
+  }
+
+  /** Engineering step: think → decide → execute → emit pheromone */
+  private async engineeringStep(
+    channel: PheromoneChannel,
+    absorbed: Pheromone[]
+  ): Promise<Pheromone | null> {
+    this.state.currentAction = "thinking";
+
+    try {
+      // Think about what we've observed
+      let thought: AgentThought | null = null;
+
+      if (absorbed.length > 0 && this.state.personality.sociability > 0.4) {
+        // Cross-pollinate from absorbed pheromones
+        const { thought: synthThought, tokensUsed } = await synthesizeKnowledge(
+          this.state,
+          absorbed
+        );
+        thought = synthThought;
+        this.state.tokensUsed += tokensUsed;
+      } else {
+        // Form independent thought about what to explore/build
+        const trigger = this.discoveredRepos.length > 0 ? "repo_analysis" : "exploration";
+        const observation = this.discoveredRepos.length > 0
+          ? `Have studied ${this.state.reposStudied.length} repos. Discovered ${this.discoveredIssues.length} issues.`
+          : `Step ${this.state.stepCount}, exploring ${this.state.explorationTarget}`;
+
+        const { thought: formThoughtResult, tokensUsed } = await formThought(
+          this.state,
+          trigger,
+          observation,
+          `Specialization: ${this.state.specialization}, energy: ${this.state.energy.toFixed(2)}`
+        );
+        thought = formThoughtResult;
+        this.state.tokensUsed += tokensUsed;
+      }
+
+      if (thought) {
+        this.state.thoughts.push(thought);
+        try { saveThought(thought); } catch { /* DB not ready yet */ }
+      }
+
+      // Discover repos if we don't have many
+      if (this.discoveredRepos.length < 5 && Math.random() < this.state.personality.curiosity) {
+        const discoveryTopics = (process.env.GITHUB_DISCOVERY_TOPICS || "typescript,rust,ai").split(",");
+        const topic = discoveryTopics[Math.floor(Math.random() * discoveryTopics.length)];
+        const newRepos = discoverRepos(topic, { limit: 5, minStars: 10 });
+        this.discoveredRepos.push(...newRepos);
+
+        // Also check for trending repos
+        if (Math.random() < 0.3) {
+          const trending = getTrendingRepos(topic, 7);
+          this.discoveredRepos.push(...trending);
+        }
+      }
+
+      // Collect issues from studied repos
+      if (this.discoveredIssues.length < 5 && this.discoveredRepos.length > 0) {
+        const repo = this.discoveredRepos[Math.floor(Math.random() * this.discoveredRepos.length)];
+        const issues = getActionableIssues(repo.owner, repo.repo, 5);
+        this.discoveredIssues.push(...issues);
+      }
+
+      // Generate and select a decision
+      this.state.currentAction = "deciding";
+      const candidates = generateCandidateDecisions(
+        this.state,
+        channel,
+        this.discoveredRepos,
+        this.discoveredIssues,
+        this.state.thoughts.slice(-10)
+      );
+
+      const decision = selectDecision(candidates, 0.3);
+      if (!decision) {
+        this.state.currentAction = "idle (no candidates)";
+        return null;
+      }
+
+      // Execute the decision
+      this.state.currentDecision = decision;
+      decision.status = "executing";
+      try { saveDecision(decision); } catch { /* DB not ready yet */ }
+
+      const result = await executeDecision(this.state, decision);
+
+      decision.status = result.success ? "completed" : "failed";
+      decision.result = result;
+      decision.completedAt = Date.now();
+      this.state.decisions.push(decision);
+      this.state.currentDecision = null;
+
+      try {
+        updateDecisionStatus(decision.id, decision.status, result);
+      } catch { /* DB not ready yet */ }
+
+      console.log(
+        `  [${this.state.name}] ${decision.action.type}: ${result.summary.slice(0, 80)}`
+      );
+
+      // Create engineering pheromone from the result
+      if (result.success && result.artifacts.length > 0) {
+        return this.createEngineeringPheromone(decision, result);
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`  [${this.state.name}] Engineering error: ${message.slice(0, 100)}`);
+      this.state.currentAction = "recovering from error";
+    }
+
+    return null;
+  }
+
+  /** Continue an in-progress multi-step decision */
+  private async continueExecution(absorbed: Pheromone[]): Promise<Pheromone | null> {
+    const decision = this.state.currentDecision;
+    if (!decision) return null;
+
+    // Check if we should switch to a different task
+    const lastResult = decision.result;
+    if (shouldSwitch(this.state, lastResult)) {
+      decision.status = "completed";
+      decision.completedAt = Date.now();
+      this.state.decisions.push(decision);
+      this.state.currentDecision = null;
+      return null;
+    }
+
+    // Continue executing
+    const result = await executeDecision(this.state, decision);
+    decision.result = result;
+
+    if (result.success || decision.status !== "executing") {
+      decision.status = result.success ? "completed" : "failed";
+      decision.completedAt = Date.now();
+      this.state.decisions.push(decision);
+      this.state.currentDecision = null;
+
+      if (result.success && result.artifacts.length > 0) {
+        return this.createEngineeringPheromone(decision, result);
+      }
+    }
+
+    return null;
+  }
+
+  /** Create an engineering-enhanced pheromone from a decision result */
+  private createEngineeringPheromone(
+    decision: AgentDecision,
+    result: { summary: string; artifacts: Array<{ type: string; content: string; prUrl?: string }> }
+  ): EngineeringPheromone {
+    const hasCode = result.artifacts.some((a) => a.type === "code_change");
+    const hasPR = result.artifacts.some((a) => a.type === "pr_url");
+
+    const pheromoneType = hasPR ? "pr" : hasCode ? "code" : result.artifacts.some((a) => a.type === "technique") ? "technique" : "knowledge";
+
+    const githubRefs: string[] = [];
+    const action = decision.action;
+    if ("owner" in action && "repo" in action) {
+      githubRefs.push(`${action.owner}/${action.repo}`);
+    }
+
+    const pheromone: EngineeringPheromone = {
+      id: uuid(),
+      agentId: this.state.id,
+      content: result.summary,
+      domain: this.state.explorationTarget,
+      confidence: decision.priority,
+      strength: 0.6 + decision.priority * 0.3,
+      connections: [],
+      timestamp: Date.now(),
+      attestation: hash(result.summary + this.state.id + Date.now()),
+      pheromoneType,
+      artifacts: result.artifacts.map((a) => ({
+        type: a.type as "code_change" | "pr_url" | "analysis" | "technique",
+        content: a.content,
+        prUrl: a.prUrl,
+      })),
+      githubRefs,
+      codeSnippets: result.artifacts
+        .filter((a) => a.type === "code_change")
+        .map((a) => a.content.slice(0, 200)),
+    };
+
+    this.state.knowledge.push(pheromone);
+    this.state.discoveries++;
+
+    return pheromone;
   }
 
   /** Move through the abstract exploration space */
@@ -154,6 +423,7 @@ export class SwarmAgent {
 
   /** Explore — fetch real knowledge from the internet */
   private async explore(absorbed: Pheromone[]): Promise<Pheromone | null> {
+    this.state.currentAction = "exploring";
     const discoveryChance = this.state.synchronized ? 0.7 : 0.4;
     if (Math.random() > discoveryChance) return null;
 
@@ -164,13 +434,11 @@ export class SwarmAgent {
 
     if (absorbed.length > 0 && Math.random() < 0.6) {
       // CROSS-POLLINATION: search the internet for connections
-      // between absorbed knowledge and our own domain
       const source = absorbed[Math.floor(Math.random() * absorbed.length)];
       connections = [source.id];
       confidence = Math.min(1.0, source.confidence + 0.1);
       domain = source.domain;
 
-      // Try web cross-pollination first
       const webBridge = await crossPollinateFromWeb(
         this.state.explorationTarget,
         source.content,
@@ -181,19 +449,17 @@ export class SwarmAgent {
       if (webBridge) {
         content = webBridge.content;
         console.log(
-          `    ${this.state.name} 🌐 web bridge: ${webBridge.source}`
+          `    ${this.state.name} web bridge: ${webBridge.source}`
         );
       } else {
-        // Fallback: generate from hardcoded pool
         content = this.fallbackInsight(source);
       }
 
-      // Shift exploration toward productive areas
       if (source.strength > 0.6) {
         this.state.explorationTarget = source.domain;
       }
     } else {
-      // INDEPENDENT DISCOVERY: scour the internet for knowledge
+      // INDEPENDENT DISCOVERY
       const webDiscovery = await discoverFromWeb(
         this.state.explorationTarget,
         this.explored
@@ -201,12 +467,11 @@ export class SwarmAgent {
 
       if (webDiscovery) {
         content = webDiscovery.content;
-        confidence = 0.4 + Math.random() * 0.4; // web sources get higher base confidence
+        confidence = 0.4 + Math.random() * 0.4;
         console.log(
-          `    ${this.state.name} 🌐 web discovery: ${webDiscovery.source}`
+          `    ${this.state.name} web discovery: ${webDiscovery.source}`
         );
       } else {
-        // Fallback: hardcoded pool (no internet or all topics explored)
         content = this.fallbackDiscovery();
         confidence = 0.3 + Math.random() * 0.4;
       }

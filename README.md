@@ -1,6 +1,6 @@
-# Emergent Swarm Mind
+# Emergent Swarm Mind v2
 
-**TEE agents that develop collective intelligence without a leader. Nobody told them to cooperate. Watch what happens.**
+**Autonomous engineering agents that develop collective intelligence, browse GitHub, form independent thoughts, and ship code — without a leader.**
 
 Built for the [EigenCloud Open Innovation Challenge](https://ideas.eigencloud.xyz/).
 
@@ -8,111 +8,113 @@ Built for the [EigenCloud Open Innovation Challenge](https://ideas.eigencloud.xy
 
 ## The Idea
 
-Take 6 AI agents. Put each in its own Trusted Execution Environment. Give them no shared database, no central coordinator, no instructions to cooperate. Let them explore independently.
+Take 6 AI agents. Put each in its own Trusted Execution Environment. Give them no shared database, no central coordinator, no instructions to cooperate.
 
-Each agent wanders through a knowledge domain — cryptography, distributed systems, compiler design — dropping **pheromones**: small, attested knowledge fragments signed by their TEE.
+**v1** had them explore knowledge domains and synchronize through pheromone signals.
 
-Other agents pick up these pheromones. They build on them. They drop stronger signals. A feedback loop forms.
+**v2** gives them true autonomy: they browse GitHub, study real repositories, form independent engineering opinions, decide what to build or fix, generate code, self-review, and prepare pull requests — all while maintaining the emergent collective intelligence from v1.
 
-Then, at a mathematically predictable moment — **phase transition**. The agents spontaneously synchronize. Collective intelligence emerges from individual chaos. Shared memories form that no single agent could have produced.
+Each agent has a distinct **personality** (Explorer, Fixer, Builder, Synthesizer, Generalist, Pioneer) that shapes what it notices, what it decides to work on, and how bold its contributions are.
 
-Every step is cryptographically attested. Every pheromone is content-addressed. Every contribution to the collective is traceable to exactly which agent discovered it and when. The TEE proves nobody faked it.
+Sandbox mode (default) means all code changes stay local in `workspace/` until you review and push them yourself.
 
-> *"Nobody told these agents to cooperate. Watch what happens at the 3-minute mark."*
+> *"Nobody told these agents to cooperate. Nobody told them what to build. Watch what happens."*
 
 ## Research Foundation
 
-This isn't sci-fi. It's grounded in real 2025-2026 research:
+Grounded in real 2025-2026 research:
 
 | Paper | Key Insight | How We Use It |
 |-------|------------|---------------|
-| [Emergent Collective Memory in Decentralized Multi-Agent AI Systems](https://arxiv.org/abs/2512.10166) | Mathematical proof of critical density threshold — above it, agents spontaneously synchronize | Our phase transition model |
-| [SwarmSys: Decentralized Swarm-Inspired Agents](https://arxiv.org/abs/2510.10047) | Pheromone-inspired coordination without central control | Our pheromone channel architecture |
-| [Phase Transitions in Multi-Agent Systems](https://arxiv.org/abs/2508.08473) | Physical phase transition analogy — below threshold = gas, above = crystal | Our density computation |
-| [SwarmAgentic: Automated Agentic System Generation](https://arxiv.org/abs/2506.15672) | Particle Swarm Optimization for evolving agent collaboration | Our swarm movement model |
-| [Darwin Godel Machine](https://arxiv.org/abs/2505.22954) | Self-improving agents through Darwinian selection | Knowledge evolution through pheromone reinforcement |
+| [Emergent Collective Memory](https://arxiv.org/abs/2512.10166) | Critical density threshold — above it, agents spontaneously synchronize | Phase transition model |
+| [SwarmSys](https://arxiv.org/abs/2510.10047) | Pheromone-inspired coordination without central control | Pheromone channel architecture |
+| [Phase Transitions in MAS](https://arxiv.org/abs/2508.08473) | Physical phase transition analogy — gas → crystal | Density computation |
+| [SwarmAgentic](https://arxiv.org/abs/2506.15672) | Particle Swarm Optimization for evolving collaboration | Swarm movement model |
+| [Darwin Godel Machine](https://arxiv.org/abs/2505.22954) | Self-improving agents through Darwinian selection | Knowledge evolution via pheromone reinforcement |
+
+Additionally, v2's engineering pipeline draws from:
+- **[mind-agent](https://github.com/owizdom)** pattern: GitHub monitoring, smart file scoring, context building, SQLite persistence
+- **[nightshift](https://github.com/marcus)** pattern: Plan-implement-review loop, LLM-powered code gen, task scoring, budget tracking
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    PHEROMONE CHANNEL                         │
-│         (shared signal space — no central coordinator)       │
-│                                                             │
-│    ╔═══════╗   ╔═══════╗   ╔═══════╗   ╔═══════╗          │
-│    ║ TEE-A ║   ║ TEE-B ║   ║ TEE-C ║   ║ TEE-D ║   ...    │
-│    ║       ║   ║       ║   ║       ║   ║       ║          │
-│    ║ Agent ║──▶║ Agent ║──▶║ Agent ║──▶║ Agent ║          │
-│    ║   A   ║◀──║   B   ║◀──║   C   ║◀──║   D   ║          │
-│    ╚═══════╝   ╚═══════╝   ╚═══════╝   ╚═══════╝          │
-│         │           │           │           │               │
-│         ▼           ▼           ▼           ▼               │
-│    [pheromone]  [pheromone]  [pheromone]  [pheromone]       │
-│         │           │           │           │               │
-│         └───────────┴─────┬─────┴───────────┘               │
-│                           │                                 │
-│                    ┌──────▼──────┐                          │
-│                    │  DENSITY >  │                          │
-│                    │ THRESHOLD?  │                          │
-│                    └──────┬──────┘                          │
-│                           │ YES                             │
-│                    ╔══════▼══════╗                          │
-│                    ║   PHASE     ║                          │
-│                    ║ TRANSITION  ║                          │
-│                    ║  ═══════    ║                          │
-│                    ║ COLLECTIVE  ║                          │
-│                    ║   MEMORY    ║                          │
-│                    ║  EMERGES    ║                          │
-│                    ╚═════════════╝                          │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────────┐
+│                         PHEROMONE CHANNEL                                │
+│              (shared signal space — no central coordinator)              │
+│                                                                          │
+│   ╔════════════╗  ╔════════════╗  ╔════════════╗  ╔════════════╗        │
+│   ║  TEE-A     ║  ║  TEE-B     ║  ║  TEE-C     ║  ║  TEE-D     ║  ...  │
+│   ║  Explorer  ║  ║  Fixer     ║  ║  Builder   ║  ║ Synthesizer║        │
+│   ║            ║  ║            ║  ║            ║  ║            ║        │
+│   ║ think →    ║  ║ think →    ║  ║ think →    ║  ║ think →    ║        │
+│   ║ decide →   ║  ║ decide →   ║  ║ decide →   ║  ║ decide →   ║        │
+│   ║ execute    ║  ║ execute    ║  ║ execute    ║  ║ execute    ║        │
+│   ╚════════════╝  ╚════════════╝  ╚════════════╝  ╚════════════╝        │
+│        │               │               │               │                │
+│        ▼               ▼               ▼               ▼                │
+│   [pheromone]     [pheromone]     [pheromone]     [pheromone]           │
+│   knowledge /     code / PR /     technique /     knowledge /           │
+│   analysis        fix             cross-domain    synthesis             │
+│        │               │               │               │                │
+│        └───────────────┴───────┬───────┴───────────────┘                │
+│                                │                                        │
+│                    ┌───────────▼───────────┐                            │
+│                    │  DENSITY > THRESHOLD? │                            │
+│                    └───────────┬───────────┘                            │
+│                                │ YES                                    │
+│                    ╔═══════════▼═══════════╗                            │
+│                    ║    PHASE TRANSITION   ║                            │
+│                    ║    ═══════════════    ║                            │
+│                    ║  Collective memory    ║                            │
+│                    ║  Collaborative projects║                           │
+│                    ║  Coordinated PRs      ║                            │
+│                    ╚═══════════════════════╝                            │
+└──────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## How It Works
 
-### Phase 1: Chaos (Steps 0-15ish)
+### Phase 1: Exploration (Steps 0-5)
 
-Each agent independently explores its assigned knowledge domain:
-- **Neuron-A** → data structures and algorithms
-- **Neuron-B** → distributed systems architecture
-- **Neuron-C** → cryptographic primitives
-- **Neuron-D** → network protocols
-- **Neuron-E** → database optimization
-- **Neuron-F** → consensus mechanisms
-
-They wander randomly through an abstract exploration space. Occasionally they discover something and drop a **pheromone** — a TEE-attested knowledge fragment.
+Pure v1 behavior. Each agent explores its assigned knowledge domain via Wikipedia, ArXiv, and Hacker News. They drop pheromones, absorb others', and build cross-domain bridges.
 
 ```
-Pheromone density: ░░░░░░░░░░░░░░░░░░░░ 0.082
-Agents behave independently. No coordination.
+Density: ░░░░░░░░░░░░░░░░░░░░ 0.082
+Agents behave independently. No engineering yet.
 ```
 
-### Phase 2: Cross-Pollination (Steps 15-30ish)
+### Phase 2: Progressive Engineering (Steps 5-40)
 
-Agents start picking up each other's pheromones. An agent exploring cryptography absorbs a pheromone about distributed systems — and generates a **cross-domain insight** (e.g., "Combining Merkle mountain ranges with this CAS-based approach yields an append-only commitment scheme").
+Engineering probability ramps from ~20% to ~80%. Agents start:
 
-These insights are stronger pheromones. They attract more agents. Positive feedback loop begins.
-
-```
-Pheromone density: ██████░░░░░░░░░░░░░░ 0.340
-Cross-domain connections forming. Energy increasing.
-```
-
-### Phase 3: Phase Transition (Steps ~25-35)
-
-Density crosses the critical threshold. Agents that have absorbed enough pheromones and built up enough energy **spontaneously synchronize**. Their movement shifts from random wandering to coordinated orbiting. They start producing knowledge that builds on the collective — not just individuals.
+1. **Thinking** — LLM-powered reasoning about what they've observed
+2. **Discovering** — Browsing GitHub for repos matching their interests
+3. **Deciding** — Scoring candidate actions (fix issue? study repo? share technique?)
+4. **Executing** — Plan → implement → self-review → iterate (up to 3x) → ship
 
 ```
-Pheromone density: ████████████████████ 0.620
+Density: ██████░░░░░░░░░░░░░░ 0.340
+[A:studying] [B:fixing] [D:thinking] | tokens 12.4k
+```
+
+### Phase 3: Phase Transition
+
+Density crosses the critical threshold. Agents synchronize. Post-transition:
+- Collective memories synthesize multi-agent knowledge
+- Collaborative projects detected when agents work on the same repo
+- Engineering becomes dominant (~80% of steps)
+
+```
+Density: ████████████████████ 0.620
 █████████████████████████████████████████████████
 █  PHASE TRANSITION — COLLECTIVE INTELLIGENCE   █
 █████████████████████████████████████████████████
 ```
 
-### Phase 4: Collective Memory (Steps 35+)
+### Phase 4: Autonomous Collective (Steps 40+)
 
-Synchronized agents produce **collective memories** — synthesized knowledge that combines insights from multiple agents across multiple domains. These are richer, more confident, and more connected than any single agent's discoveries.
-
-The dashboard shows it live: chaos → cross-pollination → sudden crystallization → collective intelligence.
+The swarm runs continuously (infinite by default). Agents form thoughts, make decisions, generate code, create PRs — all sandboxed locally. Budget-gated: when an agent exhausts its token budget, it falls back to exploration-only.
 
 ## Quick Start
 
@@ -120,22 +122,72 @@ The dashboard shows it live: chaos → cross-pollination → sudden crystallizat
 git clone <repo>
 cd swarm-mind
 npm install
+cp .env.example .env
+# Edit .env with your LLM API key (EigenAI, OpenAI, or Anthropic)
 npm run build
 npm start
 # Open http://localhost:3000
 ```
 
-### Configuration
+### Development Mode
 
-| Variable | Default | What it does |
+```bash
+npm run dev
+# Auto-restarts on file changes
+```
+
+### Without an LLM API Key
+
+The swarm runs fine without an API key — agents explore via web scraping (v1 behavior). Engineering mode (GitHub browsing, code generation, PR creation) requires an LLM provider.
+
+## Configuration
+
+### Core Settings
+
+| Variable | Default | Description |
 |----------|---------|-------------|
 | `SWARM_SIZE` | `6` | Number of agents |
-| `SYNC_INTERVAL_MS` | `2000` | Time between swarm steps |
-| `PHEROMONE_DECAY` | `0.12` | How fast pheromones fade (higher = faster) |
-| `CRITICAL_DENSITY` | `0.55` | Density threshold for phase transition |
+| `SYNC_INTERVAL_MS` | `3000` | Time between exploration steps |
+| `PHEROMONE_DECAY` | `0.15` | How fast pheromones fade (0-1) |
+| `CRITICAL_DENSITY` | `0.6` | Density threshold for phase transition |
 | `DASHBOARD_PORT` | `3000` | Dashboard port |
-| `EIGENAI_API_URL` | EigenAI default | Verifiable LLM endpoint |
-| `EIGENAI_API_KEY` | — | EigenAI key (runs in fallback without) |
+
+### Engineering Settings
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LLM_PROVIDER` | `eigenai` | LLM provider: `eigenai`, `openai`, or `anthropic` |
+| `EIGENAI_API_URL` | `https://api.eigenai.xyz/v1` | EigenAI endpoint |
+| `EIGENAI_API_KEY` | — | EigenAI API key |
+| `EIGENAI_MODEL` | `gpt-oss-120b-f16` | EigenAI model |
+| `TOKEN_BUDGET_PER_AGENT` | `50000` | Max tokens each agent can spend |
+| `ENGINEERING_STEP_INTERVAL_MS` | `10000` | Slower step interval during engineering |
+| `MAX_STEPS` | `0` | Total steps (0 = run forever) |
+
+### GitHub & Safety
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SANDBOX_MODE` | `true` | If true, PRs are logged locally instead of pushed |
+| `GITHUB_DISCOVERY_TOPICS` | `typescript,rust,...` | Comma-separated topics for repo discovery |
+
+### Using Different LLM Providers
+
+```bash
+# EigenAI (default)
+LLM_PROVIDER=eigenai
+EIGENAI_API_KEY=your_key
+
+# OpenAI
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o
+
+# Anthropic (via OpenAI-compatible endpoint)
+LLM_PROVIDER=anthropic
+ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_MODEL=claude-sonnet-4-20250514
+```
 
 ### Deploy to EigenCompute
 
@@ -145,110 +197,145 @@ ecloud auth generate --store
 bash scripts/deploy.sh
 ```
 
+## Agent Personalities
+
+Each agent gets a distinct personality that affects its behavior:
+
+| Preset | Curiosity | Diligence | Boldness | Sociability | Tendency |
+|--------|-----------|-----------|----------|-------------|----------|
+| Explorer | 0.9 | 0.4 | 0.3 | 0.6 | Discovers many repos, explores widely |
+| Fixer | 0.3 | 0.9 | 0.7 | 0.4 | Focuses on issues, thorough reviews |
+| Builder | 0.5 | 0.6 | 0.9 | 0.3 | Tackles hard problems, submits PRs |
+| Synthesizer | 0.7 | 0.5 | 0.4 | 0.9 | Cross-pollinates knowledge between agents |
+| Generalist | 0.6 | 0.6 | 0.6 | 0.6 | Balanced across all activities |
+| Pioneer | 0.8 | 0.3 | 0.9 | 0.5 | Explores new territory, takes risks |
+
+## Decision Scoring
+
+When an agent decides what to do next, candidates are scored with weighted factors:
+
+| Factor | Weight | Description |
+|--------|--------|-------------|
+| Cost efficiency | 0.25 | Prefer cheaper actions when budget is low |
+| Priority weight | 0.20 | Base priority by action type (fix_issue=0.9, explore_topic=0.4) |
+| Risk penalty | 0.20 | Penalize risky actions when budget is low |
+| Staleness bonus | 0.15 | Prefer actions the agent hasn't done recently |
+| Swarm alignment | 0.10 | Post-transition bonus for engineering actions |
+| Personal fit | 0.10 | Personality match (bold agents prefer PRs, curious prefer exploring) |
+
+Selection uses softmax with temperature — some randomness prevents all agents from doing the same thing.
+
+## Sandbox Mode
+
+By default (`SANDBOX_MODE=true`), agents can:
+- Discover and analyze GitHub repos
+- Clone repos locally to `workspace/`
+- Generate code changes
+- Self-review with the plan-implement-review loop
+
+But they **cannot**:
+- Push commits to remote repos
+- Create actual pull requests
+
+Instead, these actions are logged to `workspace/sandbox-log.json`. You can review what agents *would* have done and push manually.
+
+Set `SANDBOX_MODE=false` to enable auto-push (use with caution).
+
 ## What the Dashboard Shows
 
-The dashboard is a real-time visualization at `http://localhost:3000`:
+Real-time visualization at `http://localhost:3000`:
+
+**Header:**
+- Step counter, pheromone count, discovery count, sync status
+- Token usage counter, PR count
 
 **Canvas (main area):**
-- Each agent is a colored particle moving through 2D space
-- Pre-transition: random Brownian motion, scattered
-- Post-transition: coordinated orbital movement, connected by sync lines
-- Pheromone trails visible as small dots around agents
-- Connection lines between cross-referencing pheromones
-- **Flash effect** when phase transition occurs
-
-**Density Meter (bottom of canvas):**
-- Live pheromone density bar
-- Critical threshold marker (pink line)
-- When the bar crosses the line — phase transition
+- Colored particles = agents moving through 2D space
+- Action labels near agents ("studying repo", "fixing issue", "thinking...")
+- Color-coded pheromone particles: blue=knowledge, green=code, gold=PR, purple=technique
+- Sync lines post-transition, flash effect on phase transition
+- PR burst effect when a PR is created
 
 **Side Panel:**
-- Agent list with sync status and discovery count
+- Agent list with current action + PR count
 - Collective memories (post-transition)
-- Latest pheromone discoveries with content previews
+- Agent thought stream (conclusions + suggested actions)
 
 **Bottom Panel:**
-- Attestation log (TEE signatures for every pheromone)
-- Knowledge graph (cross-domain connections)
-- Domain coverage (which areas are being explored)
-
-## Why This Wins
-
-**1. It's visually spectacular.**
-Judges watch 6 particles wandering randomly. Then — at a precise, predictable moment — they snap into coordinated behavior. Like watching neurons form a thought. It's the most demo-able thing in the competition.
-
-**2. It's academically rigorous.**
-Phase transitions in multi-agent systems are real physics. The critical density threshold is mathematically predicted. The pheromone model is biologically inspired (ant colonies, neural networks). Five recent papers back the approach.
-
-**3. It showcases EigenCloud perfectly.**
-- Each agent in its own TEE = genuine isolation, no cheating
-- EigenAI for verifiable knowledge generation
-- Every pheromone is content-addressed and attested
-- Collective memories have full attribution chains
-- The TEE proves the agents actually emerged — nobody orchestrated them
-
-**4. It's genuinely novel.**
-Nobody has combined: (a) multi-agent TEEs, (b) pheromone-inspired coordination, (c) phase transition dynamics, (d) cryptographic attestation of emergent behavior. This is new.
-
-**5. The one-liner is unforgettable.**
-*"Nobody told these agents to cooperate. Watch what happens at the 3-minute mark."*
-
-## Verification & Attestation
-
-Every pheromone carries:
-```json
-{
-  "id": "uuid",
-  "agentId": "TEE-wallet-address",
-  "content": "Combining skip lists with bloom filters creates...",
-  "domain": "data structures and algorithms",
-  "confidence": 0.72,
-  "strength": 0.65,
-  "connections": ["uuid-of-source-pheromone"],
-  "attestation": "sha256:...",
-  "timestamp": 1771305091583
-}
-```
-
-Every collective memory carries:
-```json
-{
-  "id": "uuid",
-  "topic": "cryptographic primitives",
-  "synthesis": "[merged knowledge from 3 agents]",
-  "contributors": ["agent-A", "agent-C", "agent-F"],
-  "pheromoneIds": ["p1", "p2", "p3", "p4", "p5"],
-  "confidence": 0.89,
-  "attestation": "sha256:...",
-  "createdAt": 1771305200000
-}
-```
-
-Any observer can:
-1. Verify each pheromone's attestation hash
-2. Trace any collective memory back to its contributing pheromones
-3. Trace each pheromone back to its TEE-signed agent
-4. Confirm no central coordinator existed
-5. Replay the entire emergence sequence from attested records
+- Decision log — agent, action type, status (color-coded)
+- GitHub activity — repos studied, issues found, PRs created/sandboxed
+- Domain coverage — bar chart of pheromone counts per domain
 
 ## File Structure
 
 ```
 swarm-mind/
 ├── agents/
-│   ├── types.ts       # Pheromone, Agent, Swarm, CollectiveMemory types
-│   ├── agent.ts       # Individual swarm agent (exploration, pheromone logic)
-│   └── swarm.ts       # Swarm coordinator (density, phase transition, synthesis)
+│   ├── types.ts          # All type definitions (Pheromone, Agent, Engineering types)
+│   ├── agent.ts          # SwarmAgent class (exploration + engineering mode)
+│   ├── swarm.ts          # Main orchestrator (continuous loop, parallel steps)
+│   ├── scraper.ts        # Web knowledge discovery (Wikipedia, ArXiv, HN)
+│   ├── github.ts         # GitHub integration (gh CLI, repo context, sandbox)
+│   ├── thinker.ts        # LLM reasoning engine (thoughts, code gen, review)
+│   ├── decider.ts        # Decision scoring and selection
+│   ├── executor.ts       # Plan-implement-review execution loop
+│   └── persistence.ts    # SQLite state persistence
 ├── dashboard/
-│   ├── index.html     # Canvas-based real-time visualization
-│   └── server.ts      # Express API serving swarm state
+│   ├── index.html        # Real-time visualization (canvas + panels)
+│   └── server.ts         # Express API (state, thoughts, decisions, repos, PRs)
+├── workspace/            # Cloned repos + sandbox logs (gitignored)
 ├── scripts/
-│   └── deploy.sh      # EigenCompute deployment
-├── Dockerfile         # linux/amd64 for TEE
+│   └── deploy.sh         # EigenCompute deployment
+├── .env.example          # Configuration template
+├── Dockerfile            # linux/amd64 for TEE
 ├── package.json
 ├── tsconfig.json
 └── README.md
 ```
+
+## Persistence
+
+Agent state is persisted to `swarm-mind.db` (SQLite) every 10 steps and on graceful shutdown (Ctrl+C). Tables:
+
+- `agents` — personality, token usage, repos studied, PRs created
+- `thoughts` — full reasoning chains with confidence scores
+- `decisions` — action, priority, cost, status, result
+- `repos` — discovered GitHub repos with relevance scores
+- `prs_created` — PR URLs and status
+- `scan_history` — discovery queries and results
+
+On restart, the swarm creates fresh agents but the database retains history for analysis.
+
+## Verification & Attestation
+
+Every pheromone carries a SHA-256 attestation hash. Every collective memory traces back to contributing pheromones and agents. The TEE proves no central coordinator existed.
+
+```json
+{
+  "id": "uuid",
+  "agentId": "TEE-wallet-address",
+  "content": "Studied owner/repo: well-structured TypeScript project...",
+  "pheromoneType": "code",
+  "artifacts": [{"type": "code_change", "content": "..."}],
+  "githubRefs": ["owner/repo"],
+  "attestation": "sha256:...",
+  "timestamp": 1771305091583
+}
+```
+
+## Key Design Decisions
+
+1. **Extend, don't replace** — All v2 types extend v1 via TypeScript `extends`. Existing pheromone/phase-transition logic is untouched.
+
+2. **Sandbox by default** — Code changes stay local. User reviews before anything is pushed.
+
+3. **Parallel agent steps** — `Promise.allSettled()` so LLM/GitHub I/O doesn't block other agents.
+
+4. **Progressive engagement** — Steps 0-5 are pure exploration. Engineering ramps from 20% to 80% over 40 steps. Agents build knowledge before acting on it.
+
+5. **Budget-gated** — Each agent has a token budget. When exhausted, it falls back to exploration-only. No runaway costs.
+
+6. **Personality differentiation** — Distinct curiosity/diligence/boldness/sociability values cause natural specialization.
 
 ## References
 

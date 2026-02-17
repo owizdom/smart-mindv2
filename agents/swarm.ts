@@ -7,35 +7,44 @@ import {
   CollectiveMemory,
   SwarmMetrics,
   Pheromone,
+  LLMConfig,
+  AgentThought,
+  AgentDecision,
+  CollaborativeProject,
   hash,
   hashObject,
 } from "./types";
 import { SwarmAgent } from "./agent";
 import { startDashboard } from "../dashboard/server";
+import { initThinker, getTotalTokensUsed } from "./thinker";
+import { initDatabase, closeDatabase, saveAgent, getRecentThoughts, getRecentDecisions, getAllRepos } from "./persistence";
+import { detectCollaborativeOpportunity } from "./decider";
 import { v4 as uuid } from "uuid";
 
 /**
- * EMERGENT SWARM MIND
+ * EMERGENT SWARM MIND v2.0
  *
- * Multiple TEE agents explore independently, drop pheromones
- * (attested knowledge fragments), and absorb each other's signals.
+ * Autonomous Engineering Collective
  *
- * Above a critical density threshold — PHASE TRANSITION.
- * Agents spontaneously synchronize. Collective memory emerges.
- * Nobody told them to cooperate. The math predicted when.
- * The TEE proves they weren't faking it.
+ * Agents explore the internet, discover GitHub repos, form independent
+ * engineering thoughts, decide what to build/fix/contribute, and execute
+ * actual code changes — all without central coordination.
  *
- * Based on:
- *  - "Emergent Collective Memory in Decentralized Multi-Agent AI Systems" (2512.10166)
- *  - "SwarmSys: Decentralized Swarm-Inspired Agents" (2510.10047)
- *  - Phase transition theory in multi-agent systems (2508.08473)
+ * Progressive engagement: exploration → engineering.
+ * Sandbox by default: all code changes are local until user approves.
  */
 
 const SWARM_SIZE = parseInt(process.env.SWARM_SIZE || "6");
 const SYNC_INTERVAL = parseInt(process.env.SYNC_INTERVAL_MS || "2000");
+const ENGINEERING_STEP_INTERVAL = parseInt(process.env.ENGINEERING_STEP_INTERVAL_MS || "10000");
 const PHEROMONE_DECAY = parseFloat(process.env.PHEROMONE_DECAY || "0.12");
 const CRITICAL_DENSITY = parseFloat(process.env.CRITICAL_DENSITY || "0.55");
-const MAX_STEPS = 80;
+const MAX_STEPS = parseInt(process.env.MAX_STEPS || "0"); // 0 = infinite
+
+// Global streams for dashboard
+const globalThoughtStream: AgentThought[] = [];
+const globalDecisionLog: AgentDecision[] = [];
+const collaborativeProjects: CollaborativeProject[] = [];
 
 function createChannel(): PheromoneChannel {
   return {
@@ -50,7 +59,6 @@ function createChannel(): PheromoneChannel {
 function computeDensity(channel: PheromoneChannel, agentCount: number): number {
   if (channel.pheromones.length === 0) return 0;
 
-  // Density = (active pheromones * avg strength * connectivity) / theoretical max
   const activePheromones = channel.pheromones.filter((p) => p.strength > 0.1);
   const avgStrength =
     activePheromones.reduce((s, p) => s + p.strength, 0) /
@@ -62,7 +70,6 @@ function computeDensity(channel: PheromoneChannel, agentCount: number): number {
   const connectivity =
     totalConnections / Math.max(1, activePheromones.length * agentCount);
 
-  // Sigmoid curve — sharp transition around critical threshold
   const raw =
     (activePheromones.length / (agentCount * 8)) *
     avgStrength *
@@ -74,11 +81,9 @@ function decayPheromones(channel: PheromoneChannel): void {
   for (const p of channel.pheromones) {
     p.strength *= 1 - PHEROMONE_DECAY;
   }
-  // Remove dead pheromones
   channel.pheromones = channel.pheromones.filter((p) => p.strength > 0.05);
 }
 
-/** Synthesize collective memory when agents synchronize */
 function synthesizeCollectiveMemory(
   agents: SwarmAgent[],
   channel: PheromoneChannel
@@ -86,7 +91,6 @@ function synthesizeCollectiveMemory(
   const syncedAgents = agents.filter((a) => a.state.synchronized);
   if (syncedAgents.length < 3) return null;
 
-  // Group pheromones by domain
   const domainGroups = new Map<string, Pheromone[]>();
   for (const p of channel.pheromones) {
     if (p.strength < 0.3) continue;
@@ -95,7 +99,6 @@ function synthesizeCollectiveMemory(
     domainGroups.set(p.domain, existing);
   }
 
-  // Find the richest domain
   let bestDomain = "";
   let bestCount = 0;
   for (const [domain, pheromones] of domainGroups) {
@@ -112,7 +115,6 @@ function synthesizeCollectiveMemory(
     ...new Set(domainPheromones.map((p) => p.agentId)),
   ];
 
-  // Only create collective memory if multiple agents contributed
   if (contributors.length < 2) return null;
 
   const synthesis = domainPheromones
@@ -136,7 +138,6 @@ function synthesizeCollectiveMemory(
     createdAt: Date.now(),
   };
 
-  // Mark agents as having contributed
   for (const agent of agents) {
     if (contributors.includes(agent.state.id)) {
       agent.state.contributionsToCollective++;
@@ -165,17 +166,81 @@ function computeMetrics(
   };
 }
 
+function initLLM(): boolean {
+  const provider = (process.env.LLM_PROVIDER || "eigenai") as LLMConfig["provider"];
+
+  let config: LLMConfig;
+  switch (provider) {
+    case "openai":
+      config = {
+        provider: "openai",
+        apiUrl: process.env.OPENAI_API_URL || "https://api.openai.com/v1",
+        apiKey: process.env.OPENAI_API_KEY || "",
+        model: process.env.OPENAI_MODEL || "gpt-4o",
+      };
+      break;
+    case "anthropic":
+      config = {
+        provider: "anthropic",
+        apiUrl: process.env.ANTHROPIC_API_URL || "https://api.anthropic.com/v1",
+        apiKey: process.env.ANTHROPIC_API_KEY || "",
+        model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514",
+      };
+      break;
+    case "eigenai":
+    default:
+      config = {
+        provider: "eigenai",
+        apiUrl: process.env.EIGENAI_API_URL || "https://api.eigenai.xyz/v1",
+        apiKey: process.env.EIGENAI_API_KEY || "",
+        model: process.env.EIGENAI_MODEL || "gpt-oss-120b-f16",
+      };
+      break;
+  }
+
+  if (!config.apiKey || config.apiKey === "your_key") {
+    console.log(`[LLM] No API key for ${provider} — engineering mode disabled`);
+    return false;
+  }
+
+  try {
+    initThinker(config);
+    return true;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[LLM] Failed to initialize: ${message}`);
+    return false;
+  }
+}
+
+let isShuttingDown = false;
+
 async function main() {
   console.log("╔═══════════════════════════════════════════════════╗");
-  console.log("║          EMERGENT SWARM MIND  v1.0.0              ║");
+  console.log("║       EMERGENT SWARM MIND  v2.0.0                 ║");
+  console.log("║  Autonomous Engineering Collective                ║");
   console.log("║  No leader. No coordinator. Just emergence.       ║");
   console.log("╚═══════════════════════════════════════════════════╝");
   console.log();
 
+  // Initialize persistence
+  try {
+    initDatabase();
+    console.log("[DB] SQLite initialized at ./swarm-mind.db");
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error(`[DB] Failed to initialize: ${message}`);
+  }
+
+  // Initialize LLM
+  const llmReady = initLLM();
+
   // Create agents
   const agents: SwarmAgent[] = [];
   for (let i = 0; i < SWARM_SIZE; i++) {
-    agents.push(new SwarmAgent(i));
+    const agent = new SwarmAgent(i);
+    if (llmReady) agent.enableEngineering();
+    agents.push(agent);
   }
 
   const channel = createChannel();
@@ -192,38 +257,79 @@ async function main() {
     metrics: computeMetrics(agents, channel, collectiveMemories),
   };
 
-  // Start dashboard
+  // Start dashboard (with enhanced state)
   const port = parseInt(process.env.DASHBOARD_PORT || "3000");
-  startDashboard(swarmState, agents, port);
+  startDashboard(swarmState, agents, port, {
+    globalThoughtStream,
+    globalDecisionLog,
+    collaborativeProjects,
+  });
 
+  const sandboxMode = process.env.SANDBOX_MODE !== "false";
   console.log(`Swarm size:          ${SWARM_SIZE} agents`);
   console.log(`Critical density:    ${CRITICAL_DENSITY}`);
   console.log(`Pheromone decay:     ${PHEROMONE_DECAY}`);
   console.log(`Sync interval:       ${SYNC_INTERVAL}ms`);
+  console.log(`Engineering:         ${llmReady ? "ENABLED" : "DISABLED (no API key)"}`);
+  console.log(`Sandbox mode:        ${sandboxMode ? "ON" : "OFF"}`);
+  console.log(`Max steps:           ${MAX_STEPS === 0 ? "infinite" : MAX_STEPS}`);
+  console.log(`Token budget/agent:  ${process.env.TOKEN_BUDGET_PER_AGENT || "50000"}`);
   console.log(`TEE mode:            ${process.env.MNEMONIC ? "YES" : "LOCAL"}`);
   console.log();
   console.log("Agents:");
   for (const a of agents) {
     console.log(
-      `  ${a.state.name} — exploring "${a.state.explorationTarget}"`
+      `  ${a.state.name} [${a.state.specialization}] — exploring "${a.state.explorationTarget}"`
     );
   }
   console.log();
   console.log("Watching for phase transition...\n");
 
+  // Graceful shutdown
+  const shutdown = async () => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    console.log("\n[SHUTDOWN] Persisting state...");
+    try {
+      for (const agent of agents) {
+        saveAgent(agent.state);
+      }
+      closeDatabase();
+      console.log("[SHUTDOWN] State saved. Goodbye.");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`[SHUTDOWN] Error: ${message}`);
+    }
+    process.exit(0);
+  };
+
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+
   // Main swarm loop
-  for (let step = 0; step < MAX_STEPS; step++) {
+  for (let step = 0; MAX_STEPS === 0 || step < MAX_STEPS; step++) {
+    if (isShuttingDown) break;
     swarmState.step = step;
 
     // Decay existing pheromones
     decayPheromones(channel);
 
-    // Each agent takes a step (in parallel conceptually, sequential here)
+    // Determine step interval (slower when engineering is active)
+    const hasActiveEngineering = agents.some(
+      (a) => a.state.currentDecision !== null
+    );
+    const stepInterval = hasActiveEngineering ? ENGINEERING_STEP_INTERVAL : SYNC_INTERVAL;
+
+    // Each agent takes a step — parallel I/O with Promise.allSettled
+    const stepResults = await Promise.allSettled(
+      agents.map((agent) => agent.step(channel))
+    );
+
+    // Collect new pheromones
     const newPheromones: Pheromone[] = [];
-    for (const agent of agents) {
-      const pheromone = await agent.step(channel);
-      if (pheromone) {
-        newPheromones.push(pheromone);
+    for (const result of stepResults) {
+      if (result.status === "fulfilled" && result.value) {
+        newPheromones.push(result.value);
       }
     }
 
@@ -262,6 +368,45 @@ async function main() {
       }
     }
 
+    // Detect collaborative opportunities every 5 steps post-transition
+    if (channel.phaseTransitionOccurred && step % 5 === 0) {
+      const collab = detectCollaborativeOpportunity(
+        agents.map((a) => a.state),
+        channel,
+        channel.pheromones
+      );
+      if (collab) {
+        collaborativeProjects.push(collab);
+        console.log(`  [COLLAB] Detected: ${collab.title}`);
+      }
+    }
+
+    // Update global streams
+    for (const agent of agents) {
+      const newThoughts = agent.state.thoughts.slice(
+        globalThoughtStream.filter((t) => t.agentId === agent.state.id).length
+      );
+      globalThoughtStream.push(...newThoughts);
+
+      const newDecisions = agent.state.decisions.slice(
+        globalDecisionLog.filter((d) => d.agentId === agent.state.id).length
+      );
+      globalDecisionLog.push(...newDecisions);
+    }
+
+    // Trim global streams to prevent memory bloat
+    if (globalThoughtStream.length > 200) globalThoughtStream.splice(0, globalThoughtStream.length - 200);
+    if (globalDecisionLog.length > 200) globalDecisionLog.splice(0, globalDecisionLog.length - 200);
+
+    // Persist state every 10 steps
+    if (step % 10 === 0 && step > 0) {
+      try {
+        for (const agent of agents) {
+          saveAgent(agent.state);
+        }
+      } catch { /* DB may not be ready */ }
+    }
+
     // Update swarm state
     swarmState.agents = agents.map((a) => ({
       ...a.state,
@@ -269,11 +414,18 @@ async function main() {
     }));
     swarmState.metrics = computeMetrics(agents, channel, collectiveMemories);
 
-    // Status line
+    // Enhanced status line
     const bar = "░".repeat(20).split("");
     const filled = Math.round(channel.density * 20);
     for (let i = 0; i < filled; i++) bar[i] = "█";
     const densityBar = bar.join("");
+
+    const totalPRs = agents.reduce((s, a) => s + a.state.prsCreated.length, 0);
+    const totalTokens = agents.reduce((s, a) => s + a.state.tokensUsed, 0);
+    const activeActions = agents
+      .filter((a) => a.state.currentDecision)
+      .map((a) => `${a.state.name.split("-")[1]}:${a.state.currentAction?.split(" ")[0] || "?"}`)
+      .join(",");
 
     const status = channel.phaseTransitionOccurred ? "SYNCED" : "exploring";
     console.log(
@@ -281,25 +433,36 @@ async function main() {
         `pheromones ${String(channel.pheromones.length).padStart(3)} | ` +
         `synced ${syncCount}/${SWARM_SIZE} | ` +
         `discoveries ${agents.reduce((s, a) => s + a.state.discoveries, 0)} | ` +
+        (totalPRs > 0 ? `PRs ${totalPRs} | ` : "") +
+        (totalTokens > 0 ? `tokens ${totalTokens} | ` : "") +
+        (activeActions ? `[${activeActions}] | ` : "") +
         `${status}`
     );
 
     // Wait
-    await new Promise((r) => setTimeout(r, SYNC_INTERVAL));
+    await new Promise((r) => setTimeout(r, stepInterval));
   }
 
-  console.log("\n" + "=".repeat(60));
-  console.log("SWARM COMPLETE");
-  console.log("=".repeat(60));
-  console.log(`  Total steps:             ${MAX_STEPS}`);
-  console.log(`  Phase transition at:     step ${swarmState.transitionStep ?? "N/A"}`);
-  console.log(`  Total pheromones:        ${channel.pheromones.length}`);
-  console.log(`  Collective memories:     ${collectiveMemories.length}`);
-  console.log(`  Total discoveries:       ${agents.reduce((s, a) => s + a.state.discoveries, 0)}`);
-  console.log(`  Agents synchronized:     ${agents.filter((a) => a.state.synchronized).length}/${SWARM_SIZE}`);
-  console.log(
-    `  Attestation root:        ${hashObject(swarmState).slice(0, 32)}...`
-  );
+  // Final report (only if finite steps)
+  if (MAX_STEPS > 0) {
+    console.log("\n" + "=".repeat(60));
+    console.log("SWARM COMPLETE");
+    console.log("=".repeat(60));
+    console.log(`  Total steps:             ${MAX_STEPS}`);
+    console.log(`  Phase transition at:     step ${swarmState.transitionStep ?? "N/A"}`);
+    console.log(`  Total pheromones:        ${channel.pheromones.length}`);
+    console.log(`  Collective memories:     ${collectiveMemories.length}`);
+    console.log(`  Total discoveries:       ${agents.reduce((s, a) => s + a.state.discoveries, 0)}`);
+    console.log(`  Agents synchronized:     ${agents.filter((a) => a.state.synchronized).length}/${SWARM_SIZE}`);
+    console.log(`  Total PRs created:       ${agents.reduce((s, a) => s + a.state.prsCreated.length, 0)}`);
+    console.log(`  Total tokens used:       ${agents.reduce((s, a) => s + a.state.tokensUsed, 0)}`);
+    console.log(`  Repos studied:           ${new Set(agents.flatMap((a) => a.state.reposStudied)).size}`);
+    console.log(
+      `  Attestation root:        ${hashObject(swarmState).slice(0, 32)}...`
+    );
+
+    await shutdown();
+  }
 }
 
 main().catch((err) => {

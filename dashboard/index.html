@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Emergent Swarm Mind</title>
+  <title>Emergent Swarm Mind v2</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -17,7 +17,7 @@
     .container {
       display: grid;
       grid-template-columns: 1fr 360px;
-      grid-template-rows: 50px 1fr 200px;
+      grid-template-rows: 50px 1fr 220px;
       height: 100vh;
       gap: 0;
     }
@@ -42,14 +42,16 @@
 
     .header-stats {
       display: flex;
-      gap: 24px;
-      font-size: 0.75em;
+      gap: 18px;
+      font-size: 0.72em;
     }
 
     .header-stats .stat { color: #666; }
     .header-stats .stat .val { color: #4a9eff; font-weight: bold; }
     .header-stats .stat.synced .val { color: #a855f7; }
     .header-stats .stat.transition .val { color: #ec4899; }
+    .header-stats .stat.tokens .val { color: #f59e0b; }
+    .header-stats .stat.prs .val { color: #10b981; }
 
     /* Canvas area */
     .canvas-area {
@@ -117,6 +119,21 @@
       100% { opacity: 0; }
     }
 
+    /* PR burst effect */
+    @keyframes prBurst {
+      0% { transform: scale(0); opacity: 1; }
+      100% { transform: scale(3); opacity: 0; }
+    }
+
+    .pr-burst {
+      position: absolute;
+      width: 20px; height: 20px;
+      border-radius: 50%;
+      border: 2px solid #10b981;
+      pointer-events: none;
+      animation: prBurst 1s ease-out forwards;
+    }
+
     /* Side panel */
     .side-panel {
       background: rgba(10,10,15,0.95);
@@ -143,9 +160,9 @@
     .agent-item {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
       padding: 4px 0;
-      font-size: 0.75em;
+      font-size: 0.72em;
     }
 
     .agent-dot {
@@ -155,29 +172,30 @@
       flex-shrink: 0;
     }
 
-    .agent-name { color: #888; flex: 1; }
-    .agent-domain { color: #444; font-size: 0.85em; }
-    .agent-stat { color: #4a9eff; font-size: 0.85em; min-width: 24px; text-align: right; }
+    .agent-name { color: #888; min-width: 62px; }
+    .agent-action { color: #555; font-size: 0.85em; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .agent-stat { color: #4a9eff; font-size: 0.85em; min-width: 20px; text-align: right; }
+    .agent-pr-count { color: #10b981; font-size: 0.85em; min-width: 16px; text-align: right; }
     .agent-item.synced .agent-name { color: #a855f7; }
     .agent-item.synced .agent-dot { box-shadow: 0 0 6px currentColor; }
 
-    /* Pheromone feed */
-    .pheromone-item {
+    /* Thought stream */
+    .thought-item {
       padding: 6px 0;
       border-bottom: 1px solid #0a0a12;
       font-size: 0.7em;
     }
 
-    .pheromone-header {
+    .thought-header {
       display: flex;
       justify-content: space-between;
       margin-bottom: 2px;
     }
 
-    .pheromone-agent { font-weight: bold; }
-    .pheromone-strength { color: #444; }
-    .pheromone-content { color: #888; line-height: 1.3; }
-    .pheromone-domain { color: #4a9eff; font-size: 0.9em; }
+    .thought-agent { font-weight: bold; }
+    .thought-confidence { color: #444; }
+    .thought-conclusion { color: #888; line-height: 1.3; }
+    .thought-actions { color: #4a9eff; font-size: 0.9em; margin-top: 2px; }
 
     /* Collective memories */
     .memory-item {
@@ -233,6 +251,12 @@
       margin-bottom: 8px;
     }
 
+    /* Decision status colors */
+    .decision-status-pending { color: #666; }
+    .decision-status-executing { color: #f59e0b; }
+    .decision-status-completed { color: #10b981; }
+    .decision-status-failed { color: #f43f5e; }
+
     .empty { color: #333; font-size: 0.75em; }
   </style>
 </head>
@@ -240,12 +264,14 @@
 
 <div class="container">
   <div class="header">
-    <h1>EMERGENT SWARM MIND</h1>
+    <h1>EMERGENT SWARM MIND v2</h1>
     <div class="header-stats">
       <div class="stat">Step <span class="val" id="h-step">0</span></div>
       <div class="stat">Pheromones <span class="val" id="h-pheromones">0</span></div>
       <div class="stat">Discoveries <span class="val" id="h-discoveries">0</span></div>
       <div class="stat synced">Synced <span class="val" id="h-synced">0/0</span></div>
+      <div class="stat tokens">Tokens <span class="val" id="h-tokens">0</span></div>
+      <div class="stat prs">PRs <span class="val" id="h-prs">0</span></div>
       <div class="stat transition" id="h-transition-wrap" style="display:none">
         <span class="val">PHASE TRANSITION</span>
       </div>
@@ -274,21 +300,21 @@
       </div>
     </div>
     <div class="panel-section">
-      <h3>Latest Discoveries</h3>
-      <div id="pheromone-feed">
-        <div class="empty">Agents exploring...</div>
+      <h3>Agent Thoughts</h3>
+      <div id="thought-feed">
+        <div class="empty">Agents thinking...</div>
       </div>
     </div>
   </div>
 
   <div class="bottom-panel">
     <div class="bottom-section">
-      <h3>Attestation Log</h3>
-      <div id="attestation-log"><div class="empty">No attestations yet</div></div>
+      <h3>Decision Log</h3>
+      <div id="decision-log"><div class="empty">No decisions yet</div></div>
     </div>
     <div class="bottom-section">
-      <h3>Knowledge Graph</h3>
-      <div id="knowledge-graph"><div class="empty">Building connections...</div></div>
+      <h3>GitHub Activity</h3>
+      <div id="github-activity"><div class="empty">No GitHub activity yet</div></div>
     </div>
     <div class="bottom-section">
       <h3>Domain Coverage</h3>
@@ -304,12 +330,23 @@ const ctx = canvas.getContext('2d');
 
 let agents = [];
 let pheromones = [];
+let thoughts = [];
+let decisions = [];
 let prevTransition = false;
+let prevPRCount = 0;
 let agentColors = {};
 const palette = [
   '#4a9eff', '#a855f7', '#ec4899', '#22d3ee',
   '#f59e0b', '#10b981', '#f43f5e', '#8b5cf6'
 ];
+
+// Pheromone type colors
+const pheromoneTypeColors = {
+  knowledge: '#4a9eff',
+  code: '#10b981',
+  pr: '#f59e0b',
+  technique: '#a855f7',
+};
 
 function resize() {
   const area = canvas.parentElement;
@@ -329,6 +366,10 @@ function getColor(agentId, index) {
   return agentColors[agentId];
 }
 
+function getPheromoneColor(p) {
+  return pheromoneTypeColors[p.pheromoneType] || pheromoneTypeColors.knowledge;
+}
+
 function drawSwarm(agents, pheromones, transitioned) {
   const w = canvas.width / 2;
   const h = canvas.height / 2;
@@ -344,14 +385,13 @@ function drawSwarm(agents, pheromones, transitioned) {
     const sourceAgent = agents.find(a => a.id === p.agentId);
     if (!sourceAgent) continue;
 
-    // Draw connections to other pheromones
     for (const connId of p.connections) {
       const target = pheromones.find(pp => pp.id === connId);
       if (!target) continue;
       const targetAgent = agents.find(a => a.id === target.agentId);
       if (!targetAgent) continue;
 
-      const color = getColor(p.agentId);
+      const color = getPheromoneColor(p);
       ctx.strokeStyle = color + Math.round(p.strength * 40).toString(16).padStart(2, '0');
       ctx.beginPath();
       ctx.moveTo(sourceAgent.position.x * w / 1000, sourceAgent.position.y * h / 800);
@@ -360,7 +400,7 @@ function drawSwarm(agents, pheromones, transitioned) {
     }
   }
 
-  // Draw pheromone particles (small dots along trails)
+  // Draw pheromone particles — color-coded by type
   for (const p of pheromones) {
     if (p.strength < 0.1) continue;
     const agent = agents.find(a => a.id === p.agentId);
@@ -368,10 +408,10 @@ function drawSwarm(agents, pheromones, transitioned) {
 
     const px = agent.position.x * w / 1000 + (Math.random() - 0.5) * 40;
     const py = agent.position.y * h / 800 + (Math.random() - 0.5) * 40;
-    const color = getColor(p.agentId);
+    const color = getPheromoneColor(p);
 
     ctx.beginPath();
-    ctx.arc(px, py, p.strength * 2, 0, Math.PI * 2);
+    ctx.arc(px, py, p.strength * 2.5, 0, Math.PI * 2);
     ctx.fillStyle = color + Math.round(p.strength * 60).toString(16).padStart(2, '0');
     ctx.fill();
   }
@@ -408,10 +448,18 @@ function drawSwarm(agents, pheromones, transitioned) {
     ctx.arc(x, y, radius, 0, Math.PI * 2);
     ctx.fill();
 
-    // Name
+    // Action label (below agent name)
     ctx.fillStyle = '#444';
     ctx.font = '9px monospace';
     ctx.fillText(a.name, x + radius + 5, y + 3);
+
+    // Show current action
+    if (a.currentAction && a.currentAction !== 'idle' && a.currentAction !== 'initializing') {
+      ctx.fillStyle = '#555';
+      ctx.font = '7px monospace';
+      const actionText = a.currentAction.length > 25 ? a.currentAction.slice(0, 25) + '..' : a.currentAction;
+      ctx.fillText(actionText, x + radius + 5, y + 13);
+    }
   }
 
   // Draw sync lines between synchronized agents
@@ -431,17 +479,27 @@ function drawSwarm(agents, pheromones, transitioned) {
   }
 }
 
+function formatTokens(n) {
+  if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+  return String(n);
+}
+
 async function refresh() {
   try {
-    const [stateRes, agentsRes, pheromonesRes, collectiveRes] = await Promise.all([
+    const [stateRes, agentsRes, pheromonesRes, collectiveRes, thoughtsRes, decisionsRes] = await Promise.all([
       fetch(API + '/api/state').then(r => r.json()),
       fetch(API + '/api/agents').then(r => r.json()),
       fetch(API + '/api/pheromones').then(r => r.json()),
       fetch(API + '/api/collective').then(r => r.json()),
+      fetch(API + '/api/thoughts').then(r => r.json()).catch(() => []),
+      fetch(API + '/api/decisions').then(r => r.json()).catch(() => []),
     ]);
 
     agents = agentsRes;
     pheromones = pheromonesRes;
+    thoughts = thoughtsRes;
+    decisions = decisionsRes;
 
     // Header stats
     document.getElementById('h-step').textContent = stateRes.step;
@@ -449,6 +507,21 @@ async function refresh() {
     document.getElementById('h-discoveries').textContent = stateRes.metrics.totalDiscoveries;
     document.getElementById('h-synced').textContent =
       `${stateRes.metrics.synchronizedCount}/${agentsRes.length}`;
+    document.getElementById('h-tokens').textContent = formatTokens(stateRes.totalTokens || 0);
+    document.getElementById('h-prs').textContent = stateRes.totalPRs || 0;
+
+    // PR burst effect
+    const currentPRs = stateRes.totalPRs || 0;
+    if (currentPRs > prevPRCount && prevPRCount > 0) {
+      const canvasArea = document.querySelector('.canvas-area');
+      const burst = document.createElement('div');
+      burst.className = 'pr-burst';
+      burst.style.left = '50%';
+      burst.style.top = '50%';
+      canvasArea.appendChild(burst);
+      setTimeout(() => burst.remove(), 1000);
+    }
+    prevPRCount = currentPRs;
 
     // Phase transition flash
     if (stateRes.phaseTransitionOccurred && !prevTransition) {
@@ -471,13 +544,17 @@ async function refresh() {
     document.getElementById('critical-line').style.left =
       `calc(20px + ${threshold * 100}% * (100% - 40px) / 100%)`;
 
-    // Agent list
+    // Agent list — enhanced with current action + PR count
     document.getElementById('agent-list').innerHTML = agentsRes.map((a, i) => {
       const color = getColor(a.id, i);
+      const action = a.currentAction || 'idle';
+      const actionShort = action.length > 20 ? action.slice(0, 20) + '..' : action;
       return `<div class="agent-item ${a.synchronized ? 'synced' : ''}">
         <div class="agent-dot" style="background:${color}"></div>
         <span class="agent-name">${a.name}</span>
+        <span class="agent-action" title="${action}">${actionShort}</span>
         <span class="agent-stat">${a.discoveries}</span>
+        ${a.prsCreated > 0 ? `<span class="agent-pr-count">PR:${a.prsCreated}</span>` : ''}
       </div>`;
     }).join('');
 
@@ -492,37 +569,106 @@ async function refresh() {
       `).join('');
     }
 
-    // Pheromone feed
-    if (pheromonesRes.length > 0) {
-      document.getElementById('pheromone-feed').innerHTML = pheromonesRes
+    // Agent Thoughts stream (replaces "Latest Discoveries")
+    if (thoughtsRes.length > 0) {
+      document.getElementById('thought-feed').innerHTML = thoughtsRes
+        .slice(0, 8)
+        .map(t => {
+          const agent = agentsRes.find(a => a.id === t.agentId);
+          const color = agent ? getColor(agent.id) : '#666';
+          const actions = (t.suggestedActions || []).slice(0, 2).join(', ');
+          return `<div class="thought-item">
+            <div class="thought-header">
+              <span class="thought-agent" style="color:${color}">${agent?.name || '?'}</span>
+              <span class="thought-confidence">${(t.confidence || 0).toFixed(2)}</span>
+            </div>
+            <div class="thought-conclusion">${(t.conclusion || '').slice(0, 120)}</div>
+            ${actions ? `<div class="thought-actions">${actions}</div>` : ''}
+          </div>`;
+        }).join('');
+    } else if (pheromonesRes.length > 0) {
+      // Fallback: show pheromone discoveries if no thoughts yet
+      document.getElementById('thought-feed').innerHTML = pheromonesRes
         .sort((a, b) => b.timestamp - a.timestamp)
         .slice(0, 8)
         .map(p => {
           const agent = agentsRes.find(a => a.id === p.agentId);
           const color = getColor(p.agentId);
-          return `<div class="pheromone-item">
-            <div class="pheromone-header">
-              <span class="pheromone-agent" style="color:${color}">${agent?.name || '?'}</span>
-              <span class="pheromone-domain">${p.domain.split(' ').slice(0, 2).join(' ')}</span>
+          return `<div class="thought-item">
+            <div class="thought-header">
+              <span class="thought-agent" style="color:${color}">${agent?.name || '?'}</span>
+              <span class="thought-confidence">${p.domain.split(' ').slice(0, 2).join(' ')}</span>
             </div>
-            <div class="pheromone-content">${p.content.slice(0, 120)}...</div>
+            <div class="thought-conclusion">${p.content.slice(0, 120)}...</div>
           </div>`;
         }).join('');
     }
 
-    // Attestation log
-    if (pheromonesRes.length > 0) {
-      document.getElementById('attestation-log').innerHTML = pheromonesRes
-        .sort((a, b) => b.timestamp - a.timestamp)
-        .slice(0, 10)
-        .map(p => {
-          const agent = agentsRes.find(a => a.id === p.agentId);
-          const color = getColor(p.agentId);
-          return `<div style="font-size:0.7em;padding:2px 0;color:#444;display:flex;justify-content:space-between">
-            <span style="color:${color}">${agent?.name || '?'}</span>
-            <span>${p.attestation.slice(0, 20)}...</span>
+    // Decision Log (bottom panel 1)
+    if (decisionsRes.length > 0) {
+      document.getElementById('decision-log').innerHTML = decisionsRes
+        .slice(0, 12)
+        .map(d => {
+          const agent = agentsRes.find(a => a.id === d.agentId);
+          const color = agent ? getColor(agent.id) : '#666';
+          const actionType = d.action?.type || '?';
+          const status = d.status || 'pending';
+          return `<div style="font-size:0.7em;padding:3px 0;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #0a0a12">
+            <span style="color:${color};min-width:55px">${agent?.name || '?'}</span>
+            <span style="color:#888;flex:1;margin:0 6px">${actionType}</span>
+            <span class="decision-status-${status}">${status}</span>
           </div>`;
         }).join('');
+    }
+
+    // GitHub Activity (bottom panel 2)
+    const reposStudied = new Set();
+    const issuesFound = [];
+    const prsCreated = [];
+    agentsRes.forEach(a => {
+      if (a.prsCreated > 0) prsCreated.push({ name: a.name, count: a.prsCreated });
+    });
+
+    // Build GitHub activity from decisions
+    const ghEntries = [];
+    decisionsRes.forEach(d => {
+      const agent = agentsRes.find(a => a.id === d.agentId);
+      const name = agent?.name || '?';
+      const action = d.action;
+      if (!action) return;
+      if (action.type === 'study_repo' && action.owner) {
+        ghEntries.push({ icon: 'S', label: `${name} studied ${action.owner}/${action.repo}`, color: '#4a9eff' });
+      } else if (action.type === 'fix_issue' && action.owner) {
+        ghEntries.push({ icon: 'F', label: `${name} fixing #${action.issueNumber} in ${action.owner}/${action.repo}`, color: '#f59e0b' });
+      } else if (action.type === 'contribute_pr' && action.owner) {
+        ghEntries.push({ icon: 'P', label: `${name} PR for ${action.owner}/${action.repo}`, color: '#10b981' });
+      }
+    });
+
+    if (ghEntries.length > 0) {
+      document.getElementById('github-activity').innerHTML = ghEntries.slice(0, 10).map(e =>
+        `<div style="font-size:0.7em;padding:2px 0;color:#666;display:flex;gap:6px;border-bottom:1px solid #0a0a12">
+          <span style="color:${e.color};font-weight:bold;min-width:12px">${e.icon}</span>
+          <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${e.label}</span>
+        </div>`
+      ).join('');
+    } else {
+      // Fallback: show attestation log
+      if (pheromonesRes.length > 0) {
+        document.getElementById('github-activity').innerHTML =
+          '<div style="font-size:0.6em;color:#333;margin-bottom:6px">ATTESTATION LOG (no GitHub activity yet)</div>' +
+          pheromonesRes
+          .sort((a, b) => b.timestamp - a.timestamp)
+          .slice(0, 10)
+          .map(p => {
+            const agent = agentsRes.find(a => a.id === p.agentId);
+            const color = getColor(p.agentId);
+            return `<div style="font-size:0.7em;padding:2px 0;color:#444;display:flex;justify-content:space-between">
+              <span style="color:${color}">${agent?.name || '?'}</span>
+              <span>${p.attestation.slice(0, 20)}...</span>
+            </div>`;
+          }).join('');
+      }
     }
 
     // Domain coverage
@@ -540,30 +686,6 @@ async function refresh() {
           <div style="height:4px;background:#1a1a2e;border-radius:2px;overflow:hidden">
             <div style="height:100%;width:${pct}%;background:linear-gradient(90deg,#4a9eff,#a855f7);border-radius:2px"></div>
           </div>
-        </div>`;
-      }).join('');
-    }
-
-    // Knowledge graph (connection count between domains)
-    const connections = {};
-    pheromonesRes.forEach(p => {
-      p.connections.forEach(cid => {
-        const target = pheromonesRes.find(pp => pp.id === cid);
-        if (target && target.domain !== p.domain) {
-          const key = [p.domain, target.domain].sort().join(' <> ');
-          connections[key] = (connections[key] || 0) + 1;
-        }
-      });
-    });
-    const connSorted = Object.entries(connections).sort((a, b) => b[1] - a[1]);
-    if (connSorted.length > 0) {
-      document.getElementById('knowledge-graph').innerHTML = connSorted.slice(0, 6).map(([link, count]) => {
-        const parts = link.split(' <> ');
-        return `<div style="font-size:0.65em;padding:2px 0;color:#666">
-          <span style="color:#4a9eff">${parts[0]?.split(' ').slice(0,2).join(' ')}</span>
-          <span style="color:#333"> → </span>
-          <span style="color:#a855f7">${parts[1]?.split(' ').slice(0,2).join(' ')}</span>
-          <span style="color:#333"> (${count})</span>
         </div>`;
       }).join('');
     }
