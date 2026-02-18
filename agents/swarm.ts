@@ -20,7 +20,6 @@ import { initThinker, getTotalTokensUsed, generateCollectiveReport } from "./thi
 import { initDatabase, closeDatabase, saveAgent, getRecentThoughts, getRecentDecisions, saveCollectiveMemory } from "./persistence";
 import { isEnabled as eigenDAEnabled } from "./eigenda";
 import { detectCollaborativeOpportunity } from "./decider";
-import { earnCredits } from "./credits";
 import { v4 as uuid } from "uuid";
 
 /**
@@ -189,8 +188,6 @@ async function synthesizeCollectiveMemory(
   for (const agent of agents) {
     if (contributors.includes(agent.state.id)) {
       agent.state.contributionsToCollective++;
-      // Reward contributing agents with collective_contribution credits
-      agent.state.credits = earnCredits(agent.state.credits, 10, "collective_contribution");
     }
   }
 

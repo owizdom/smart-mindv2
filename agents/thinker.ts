@@ -9,19 +9,15 @@ import type {
   CollectiveReport,
   ScienceDataset,
 } from "./types";
-import { MODEL_BY_TIER } from "./credits";
-
 let openaiClient: OpenAI | null = null;
 let anthropicClient: Anthropic | null = null;
 let activeProvider: LLMConfig["provider"] = "eigenai";
 let modelName = "gpt-oss-120b-f16";
-let fallbackModelName: string | null = null; // haiku for low_compute tier
 let totalTokensTracked = 0;
 
 export function initThinker(config: LLMConfig): void {
   activeProvider = config.provider;
   modelName = config.model;
-  fallbackModelName = MODEL_BY_TIER["low_compute"];
 
   if (config.provider === "anthropic") {
     anthropicClient = new Anthropic({ apiKey: config.apiKey });
@@ -33,7 +29,6 @@ export function initThinker(config: LLMConfig): void {
   }
 
   console.log(`[THINKER] Initialized with ${config.provider} model: ${config.model}`);
-  console.log(`[THINKER] Low-compute fallback: ${fallbackModelName}`);
 }
 
 export function getTotalTokensUsed(): number {
@@ -46,19 +41,6 @@ interface CallOptions {
   maxTokens?: number;
   temperature?: number;
   jsonMode?: boolean;
-  modelOverride?: string | null; // null = use default, string = override model
-}
-
-/** Returns the model to use for an agent based on its survival tier */
-function resolveModel(agentState: AutonomousAgentState): { override: string | null; skip: boolean } {
-  const tier = agentState.credits?.tier;
-  if (!tier || tier === "normal") return { override: null, skip: false };
-  if (tier === "low_compute") {
-    if (activeProvider === "anthropic") return { override: fallbackModelName, skip: false };
-    return { override: null, skip: false }; // non-Anthropic: no cheaper model, proceed as-is
-  }
-  // critical or dead — no LLM calls
-  return { override: null, skip: true };
 }
 
 async function callLLM(
@@ -68,12 +50,11 @@ async function callLLM(
 ): Promise<{ content: string; tokensUsed: number }> {
   const maxTokens = options.maxTokens || 1000;
   const temperature = options.temperature ?? 0.7;
-  const modelOverride = options.modelOverride !== undefined ? options.modelOverride : null;
 
   if (activeProvider === "anthropic") {
-    return callAnthropic(systemPrompt, userPrompt, maxTokens, temperature, options.jsonMode, modelOverride);
+    return callAnthropic(systemPrompt, userPrompt, maxTokens, temperature, options.jsonMode);
   }
-  return callOpenAI(systemPrompt, userPrompt, maxTokens, temperature, options.jsonMode, modelOverride);
+  return callOpenAI(systemPrompt, userPrompt, maxTokens, temperature, options.jsonMode);
 }
 
 async function callAnthropic(
@@ -81,12 +62,11 @@ async function callAnthropic(
   userPrompt: string,
   maxTokens: number,
   temperature: number,
-  jsonMode?: boolean,
-  modelOverride?: string | null
+  jsonMode?: boolean
 ): Promise<{ content: string; tokensUsed: number }> {
   if (!anthropicClient) throw new Error("Anthropic client not initialized.");
 
-  const effectiveModel = modelOverride ?? modelName;
+  const effectiveModel = modelName;
   const prompt = jsonMode
     ? userPrompt + "\n\nIMPORTANT: Respond with valid JSON only, no markdown fences."
     : userPrompt;
@@ -137,12 +117,11 @@ async function callOpenAI(
   userPrompt: string,
   maxTokens: number,
   temperature: number,
-  jsonMode?: boolean,
-  modelOverride?: string | null
+  jsonMode?: boolean
 ): Promise<{ content: string; tokensUsed: number }> {
   if (!openaiClient) throw new Error("OpenAI client not initialized.");
 
-  const effectiveModel = modelOverride ?? modelName;
+  const effectiveModel = modelName;
   const maxRetries = 2;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
@@ -194,11 +173,6 @@ function buildSystemPrompt(agent: AutonomousAgentState): string {
   if (p.sociability > 0.7) traits.push("collaborative, eager to share findings with the swarm");
   else if (p.sociability < 0.3) traits.push("independent, does deep analysis before sharing");
 
-  const creditTier = agent.credits?.tier || "normal";
-  const tierNote = creditTier === "low_compute"
-    ? "\nNote: You are in low-compute mode — keep responses concise."
-    : "";
-
   return `You are ${agent.name}, an autonomous scientific research agent in a NASA swarm collective.
 Your specialization: ${agent.specialization}.
 Your personality: ${traits.join("; ") || "balanced scientific approach"}.
@@ -206,7 +180,6 @@ Your personality: ${traits.join("; ") || "balanced scientific approach"}.
 You analyze real NASA datasets, form scientific hypotheses, and share findings with the swarm.
 You have analyzed ${agent.reposStudied.length} datasets so far.
 Current token budget remaining: ${agent.tokenBudget - agent.tokensUsed}.
-Credits: ${agent.credits?.balance.toFixed(1) || "N/A"} [${creditTier}]${tierNote}
 
 Be specific — reference actual numbers from the data. Form real scientific opinions.`;
 }
@@ -219,19 +192,6 @@ export async function formThought(
   observation: string,
   context: string
 ): Promise<{ thought: AgentThought; tokensUsed: number }> {
-  const { override, skip } = resolveModel(agentState);
-  if (skip) {
-    return {
-      thought: {
-        id: uuid(), agentId: agentState.id, trigger, observation,
-        reasoning: "Agent conserving resources (critical tier).",
-        conclusion: "Monitoring passively.", suggestedActions: [],
-        confidence: 0.2, timestamp: Date.now(),
-      },
-      tokensUsed: 0,
-    };
-  }
-
   const systemPrompt = buildSystemPrompt(agentState);
   const userPrompt = `You observed something. Form a structured engineering thought.
 
@@ -250,7 +210,6 @@ Respond as JSON:
   const { content, tokensUsed } = await callLLM(systemPrompt, userPrompt, {
     maxTokens: 800,
     jsonMode: true,
-    modelOverride: override,
   });
 
   let parsed: { reasoning?: string; conclusion?: string; suggestedActions?: string[]; confidence?: number } = {};
@@ -284,21 +243,6 @@ export async function analyzeDataset(
   agentState: AutonomousAgentState,
   dataset: ScienceDataset
 ): Promise<{ thought: AgentThought; tokensUsed: number }> {
-  const { override, skip } = resolveModel(agentState);
-  if (skip) {
-    return {
-      thought: {
-        id: uuid(), agentId: agentState.id,
-        trigger: `dataset_analysis:${dataset.topic}`,
-        observation: `Scanned ${dataset.subtopic}`,
-        reasoning: "Agent conserving resources (critical tier).",
-        conclusion: dataset.highlights[0] || "Dataset noted.", suggestedActions: [],
-        confidence: 0.2, timestamp: Date.now(),
-      },
-      tokensUsed: 0,
-    };
-  }
-
   const systemPrompt = buildSystemPrompt(agentState);
 
   const statsText = Object.entries(dataset.stats)
@@ -334,7 +278,6 @@ Respond as JSON:
   const { content, tokensUsed } = await callLLM(systemPrompt, userPrompt, {
     maxTokens: 1200,
     jsonMode: true,
-    modelOverride: override,
   });
 
   let parsed: { reasoning?: string; conclusion?: string; suggestedActions?: string[]; confidence?: number } = {};
@@ -359,21 +302,6 @@ export async function synthesizeKnowledge(
   agentState: AutonomousAgentState,
   pheromones: Pheromone[]
 ): Promise<{ thought: AgentThought; tokensUsed: number }> {
-  const { override, skip } = resolveModel(agentState);
-  if (skip) {
-    return {
-      thought: {
-        id: uuid(), agentId: agentState.id,
-        trigger: "knowledge_synthesis",
-        observation: `Passive scan of ${pheromones.length} pheromones`,
-        reasoning: "Agent conserving resources (critical tier).",
-        conclusion: "Monitoring swarm signals.", suggestedActions: [],
-        confidence: 0.2, timestamp: Date.now(),
-      },
-      tokensUsed: 0,
-    };
-  }
-
   const systemPrompt = buildSystemPrompt(agentState);
 
   const pheromoneInfo = pheromones
@@ -399,7 +327,6 @@ Respond as JSON:
   const { content, tokensUsed } = await callLLM(systemPrompt, userPrompt, {
     maxTokens: 1000,
     jsonMode: true,
-    modelOverride: override,
   });
 
   let parsed: { reasoning?: string; conclusion?: string; suggestedActions?: string[]; confidence?: number } = {};
