@@ -3,9 +3,11 @@ import path from "path";
 import type {
   AgentThought,
   AgentDecision,
-  GitHubRepo,
+  Pheromone,
+  CollectiveMemory,
   AutonomousAgentState,
 } from "./types";
+import { disperseAsync } from "./eigenda";
 
 let db: Database.Database | null = null;
 
@@ -39,7 +41,31 @@ export function initDatabase(dbPath?: string): Database.Database {
       suggested_actions_json TEXT,
       confidence REAL,
       timestamp INTEGER,
+      eigenda_commitment TEXT,
       FOREIGN KEY (agent_id) REFERENCES agents(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS pheromones (
+      id TEXT PRIMARY KEY,
+      agent_id TEXT NOT NULL,
+      content TEXT,
+      domain TEXT,
+      confidence REAL,
+      strength REAL,
+      connections_json TEXT DEFAULT '[]',
+      timestamp INTEGER,
+      attestation TEXT,
+      eigenda_commitment TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS collective_memories (
+      id TEXT PRIMARY KEY,
+      domain TEXT,
+      synthesis TEXT,
+      contributors_json TEXT DEFAULT '[]',
+      confidence REAL,
+      timestamp INTEGER,
+      eigenda_commitment TEXT
     );
 
     CREATE TABLE IF NOT EXISTS decisions (
@@ -94,7 +120,14 @@ export function initDatabase(dbPath?: string): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_decisions_status ON decisions(status);
     CREATE INDEX IF NOT EXISTS idx_thoughts_timestamp ON thoughts(timestamp);
     CREATE INDEX IF NOT EXISTS idx_decisions_created ON decisions(created_at);
+    CREATE INDEX IF NOT EXISTS idx_pheromones_timestamp ON pheromones(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_collective_timestamp ON collective_memories(timestamp);
   `);
+
+  // Migrate existing schemas — add eigenda_commitment if missing
+  for (const table of ["thoughts", "pheromones", "collective_memories"]) {
+    try { db.exec(`ALTER TABLE ${table} ADD COLUMN eigenda_commitment TEXT`); } catch { /* column exists */ }
+  }
 
   return db;
 }
@@ -152,8 +185,8 @@ export function loadAgent(id: string): Partial<AutonomousAgentState> | null {
 export function saveThought(thought: AgentThought): void {
   const d = getDb();
   d.prepare(`
-    INSERT OR REPLACE INTO thoughts (id, agent_id, trigger, observation, reasoning, conclusion, suggested_actions_json, confidence, timestamp)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO thoughts (id, agent_id, trigger, observation, reasoning, conclusion, suggested_actions_json, confidence, timestamp, eigenda_commitment)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     thought.id,
     thought.agentId,
@@ -163,8 +196,76 @@ export function saveThought(thought: AgentThought): void {
     thought.conclusion,
     JSON.stringify(thought.suggestedActions),
     thought.confidence,
-    thought.timestamp
+    thought.timestamp,
+    null // updated asynchronously below
   );
+
+  // Fire-and-forget: disperse to EigenDA, update commitment when confirmed
+  disperseAsync(thought, (result) => {
+    try {
+      getDb()
+        .prepare("UPDATE thoughts SET eigenda_commitment = ? WHERE id = ?")
+        .run(result.commitment, thought.id);
+    } catch { /* DB closed */ }
+  }, `thought:${thought.id.slice(0, 8)}`);
+}
+
+export function savePheromone(pheromone: Pheromone): void {
+  const d = getDb();
+  d.prepare(`
+    INSERT OR REPLACE INTO pheromones (id, agent_id, content, domain, confidence, strength, connections_json, timestamp, attestation, eigenda_commitment)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    pheromone.id,
+    pheromone.agentId,
+    pheromone.content,
+    pheromone.domain,
+    pheromone.confidence,
+    pheromone.strength,
+    JSON.stringify(pheromone.connections),
+    pheromone.timestamp,
+    pheromone.attestation,
+    null
+  );
+
+  // Disperse pheromone to EigenDA — the returned commitment replaces the local hash
+  disperseAsync(
+    { id: pheromone.id, agentId: pheromone.agentId, content: pheromone.content, domain: pheromone.domain, confidence: pheromone.confidence, timestamp: pheromone.timestamp },
+    (result) => {
+      try {
+        getDb()
+          .prepare("UPDATE pheromones SET eigenda_commitment = ?, attestation = ? WHERE id = ?")
+          .run(result.commitment, `eigenda:${result.commitment}`, pheromone.id);
+      } catch { /* DB closed */ }
+    },
+    `pheromone:${pheromone.id.slice(0, 8)}`
+  );
+}
+
+export function saveCollectiveMemory(memory: CollectiveMemory): void {
+  const d = getDb();
+  d.prepare(`
+    INSERT OR REPLACE INTO collective_memories (id, domain, synthesis, contributors_json, confidence, timestamp, eigenda_commitment)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    memory.id,
+    memory.topic,
+    memory.synthesis,
+    JSON.stringify(memory.contributors),
+    memory.confidence,
+    memory.createdAt,
+    null
+  );
+
+  // Collective memories are the high-value output — always anchor to EigenDA
+  disperseAsync(memory, (result) => {
+    try {
+      getDb()
+        .prepare("UPDATE collective_memories SET eigenda_commitment = ? WHERE id = ?")
+        .run(result.commitment, memory.id);
+      console.log(`  [EigenDA] Collective memory anchored: ${result.commitment.slice(0, 24)}…`);
+    } catch { /* DB closed */ }
+  }, `collective:${memory.topic}`);
 }
 
 export function getRecentThoughts(limit = 50): AgentThought[] {
@@ -236,36 +337,30 @@ export function getRecentDecisions(limit = 50): AgentDecision[] {
   }));
 }
 
-// ── Repo CRUD ──
+// ── Pheromone queries ──
 
-export function saveRepo(repo: GitHubRepo): void {
+export function getRecentPheromones(limit = 50): Array<{ id: string; domain: string; content: string; confidence: number; eigendaCommitment: string | null; timestamp: number }> {
   const d = getDb();
-  d.prepare(`
-    INSERT OR REPLACE INTO repos (owner, repo, description, language, stars, topics_json, relevance_score, discovered_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    repo.owner,
-    repo.repo,
-    repo.description,
-    repo.language,
-    repo.stars,
-    JSON.stringify(repo.topics),
-    repo.relevanceScore,
-    Date.now()
-  );
+  const rows = d.prepare("SELECT * FROM pheromones ORDER BY timestamp DESC LIMIT ?").all(limit) as Record<string, unknown>[];
+  return rows.map((r) => ({
+    id: r.id as string,
+    domain: r.domain as string,
+    content: r.content as string,
+    confidence: r.confidence as number,
+    eigendaCommitment: (r.eigenda_commitment as string | null),
+    timestamp: r.timestamp as number,
+  }));
 }
 
-export function getAllRepos(): GitHubRepo[] {
+export function getCollectiveMemories(): Array<{ id: string; domain: string; synthesis: string; eigendaCommitment: string | null; timestamp: number }> {
   const d = getDb();
-  const rows = d.prepare("SELECT * FROM repos ORDER BY relevance_score DESC").all() as Record<string, unknown>[];
-  return rows.map((row) => ({
-    owner: row.owner as string,
-    repo: row.repo as string,
-    description: (row.description as string) || "",
-    language: (row.language as string) || "",
-    stars: row.stars as number,
-    topics: JSON.parse((row.topics_json as string) || "[]"),
-    relevanceScore: row.relevance_score as number,
+  const rows = d.prepare("SELECT * FROM collective_memories ORDER BY timestamp DESC").all() as Record<string, unknown>[];
+  return rows.map((r) => ({
+    id: r.id as string,
+    domain: r.domain as string,
+    synthesis: r.synthesis as string,
+    eigendaCommitment: (r.eigenda_commitment as string | null),
+    timestamp: r.timestamp as number,
   }));
 }
 

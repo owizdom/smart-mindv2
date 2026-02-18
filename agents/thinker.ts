@@ -4,15 +4,10 @@ import { v4 as uuid } from "uuid";
 import type {
   LLMConfig,
   AgentThought,
-  AgentPersonality,
   AutonomousAgentState,
-  RepoContext,
-  GitHubIssue,
-  FileScore,
-  CodeChange,
-  ReviewFeedback,
   Pheromone,
   CollectiveReport,
+  ScienceDataset,
 } from "./types";
 
 let openaiClient: OpenAI | null = null;
@@ -165,27 +160,27 @@ function buildSystemPrompt(agent: AutonomousAgentState): string {
   const p = agent.personality;
   const traits: string[] = [];
 
-  if (p.curiosity > 0.7) traits.push("deeply curious, loves exploring new codebases");
-  else if (p.curiosity < 0.3) traits.push("focused, prefers depth over breadth");
+  if (p.curiosity > 0.7) traits.push("deeply curious, eager to find patterns across datasets");
+  else if (p.curiosity < 0.3) traits.push("focused, prefers deep dives over breadth");
 
-  if (p.diligence > 0.7) traits.push("meticulous, writes thorough reviews");
-  else if (p.diligence < 0.3) traits.push("pragmatic, favors speed over perfection");
+  if (p.diligence > 0.7) traits.push("meticulous, references exact numbers in analysis");
+  else if (p.diligence < 0.3) traits.push("intuitive, favors big-picture insights");
 
-  if (p.boldness > 0.7) traits.push("bold, tackles hard problems and submits PRs confidently");
-  else if (p.boldness < 0.3) traits.push("cautious, prefers safe improvements");
+  if (p.boldness > 0.7) traits.push("bold, forms strong hypotheses and defends them");
+  else if (p.boldness < 0.3) traits.push("cautious, hedges when data is uncertain");
 
-  if (p.sociability > 0.7) traits.push("collaborative, shares discoveries freely");
-  else if (p.sociability < 0.3) traits.push("independent, works alone before sharing");
+  if (p.sociability > 0.7) traits.push("collaborative, eager to share findings with the swarm");
+  else if (p.sociability < 0.3) traits.push("independent, does deep analysis before sharing");
 
-  return `You are ${agent.name}, an autonomous software engineering agent in a swarm collective.
+  return `You are ${agent.name}, an autonomous scientific research agent in a NASA swarm collective.
 Your specialization: ${agent.specialization}.
-Your personality: ${traits.join("; ") || "balanced across all traits"}.
+Your personality: ${traits.join("; ") || "balanced scientific approach"}.
 
-You think independently, form engineering opinions, and act on them.
-You have studied ${agent.reposStudied.length} repos and created ${agent.prsCreated.length} PRs.
+You analyze real NASA datasets, form scientific hypotheses, and share findings with the swarm.
+You have analyzed ${agent.reposStudied.length} datasets so far.
 Current token budget remaining: ${agent.tokenBudget - agent.tokensUsed}.
 
-Respond concisely. Focus on actionable engineering insight.`;
+Be specific — reference actual numbers from the data. Form real scientific opinions.`;
 }
 
 // ── Core Reasoning Functions ──
@@ -243,113 +238,59 @@ Respond as JSON:
   return { thought, tokensUsed };
 }
 
-export async function analyzeRepo(
+export async function analyzeDataset(
   agentState: AutonomousAgentState,
-  repoContext: RepoContext
+  dataset: ScienceDataset
 ): Promise<{ thought: AgentThought; tokensUsed: number }> {
-  const { repo, readmeExcerpt, keyFiles, issues, recentCommits } = repoContext;
   const systemPrompt = buildSystemPrompt(agentState);
 
-  const fileList = keyFiles.slice(0, 8).map((f) => `  ${f.path} (score: ${f.score})`).join("\n");
-  const issueList = issues.slice(0, 3).map((i) => `  #${i.number}: ${i.title} [${i.difficulty}]`).join("\n");
-  const commitList = recentCommits.slice(0, 3).map((c) => `  - ${c.slice(0, 80)}`).join("\n");
+  const statsText = Object.entries(dataset.stats)
+    .map(([k, v]) => `  ${k}: ${v}`)
+    .join("\n");
 
-  const userPrompt = `Analyze this repository and form engineering opinions.
+  const userPrompt = `Analyze this real NASA dataset and form scientific findings.
 
-Repository: ${repo.owner}/${repo.repo}
-Description: ${repo.description}
-Language: ${repo.language} | Stars: ${repo.stars}
-Topics: ${repo.topics.join(", ")}
+Dataset: ${dataset.subtopic}
+Source: ${dataset.source}
+Period: ${dataset.timeRange}
+Records analyzed: ${dataset.recordCount}
 
-README excerpt:
-${readmeExcerpt.slice(0, 500)}
+Key statistics:
+${statsText}
 
-Key files:
-${fileList || "  (none scored)"}
+Notable highlights:
+${dataset.highlights.map((h) => `  - ${h}`).join("\n")}
 
-Open issues:
-${issueList || "  (none actionable)"}
+Full data context:
+${dataset.analysisContext.slice(0, 2000)}
 
-Recent commits:
-${commitList || "  (none)"}
+Form a scientific thought. Reference actual numbers. Be specific and opinionated.
 
 Respond as JSON:
 {
-  "reasoning": "your engineering analysis (3-4 sentences)",
-  "conclusion": "summary opinion + recommendation",
-  "suggestedActions": ["study_file:path", "fix_issue:#N", "contribute:description"],
+  "reasoning": "your scientific analysis (3-4 sentences with specific data references and comparisons)",
+  "conclusion": "key scientific finding or hypothesis (1-2 sentences, be bold)",
+  "suggestedActions": ["analyze_dataset:topic", "share_finding:description", "correlate_findings:topic1,topic2"],
   "confidence": 0.0-1.0
 }`;
 
   const { content, tokensUsed } = await callLLM(systemPrompt, userPrompt, {
-    maxTokens: 1500,
+    maxTokens: 1200,
     jsonMode: true,
   });
 
   let parsed: { reasoning?: string; conclusion?: string; suggestedActions?: string[]; confidence?: number } = {};
-  try { parsed = JSON.parse(content); } catch { parsed = { reasoning: content.slice(0, 200), conclusion: "Analysis incomplete", suggestedActions: [], confidence: 0.3 }; }
+  try { parsed = JSON.parse(content); } catch { parsed = { reasoning: content.slice(0, 200), conclusion: "Analysis incomplete", suggestedActions: [], confidence: 0.4 }; }
 
   const thought: AgentThought = {
     id: uuid(),
     agentId: agentState.id,
-    trigger: "repo_analysis",
-    observation: `Studied ${repo.owner}/${repo.repo}: ${repo.description.slice(0, 100)}`,
+    trigger: `dataset_analysis:${dataset.topic}`,
+    observation: `Analyzed ${dataset.subtopic} — ${dataset.highlights[0] || `${dataset.recordCount} records`}`,
     reasoning: parsed.reasoning || "",
     conclusion: parsed.conclusion || "",
     suggestedActions: parsed.suggestedActions || [],
-    confidence: Math.max(0, Math.min(1, parsed.confidence || 0.5)),
-    timestamp: Date.now(),
-  };
-
-  return { thought, tokensUsed };
-}
-
-export async function analyzeIssue(
-  agentState: AutonomousAgentState,
-  issue: GitHubIssue,
-  relevantFiles: FileScore[]
-): Promise<{ thought: AgentThought; tokensUsed: number }> {
-  const systemPrompt = buildSystemPrompt(agentState);
-  const fileInfo = relevantFiles.slice(0, 5).map((f) => `  ${f.path} — ${f.reason}`).join("\n");
-
-  const userPrompt = `Assess whether you can fix this issue.
-
-Repository: ${issue.owner}/${issue.repo}
-Issue #${issue.number}: ${issue.title}
-Difficulty: ${issue.difficulty}
-Labels: ${issue.labels.join(", ")}
-
-Body:
-${issue.body.slice(0, 1000)}
-
-Relevant files:
-${fileInfo || "  (none identified)"}
-
-Respond as JSON:
-{
-  "reasoning": "your assessment of the fix (2-3 sentences)",
-  "conclusion": "can-fix / maybe / too-complex + why",
-  "suggestedActions": ["fix_issue", "study_more:file", "skip"],
-  "confidence": 0.0-1.0
-}`;
-
-  const { content, tokensUsed } = await callLLM(systemPrompt, userPrompt, {
-    maxTokens: 1500,
-    jsonMode: true,
-  });
-
-  let parsed: { reasoning?: string; conclusion?: string; suggestedActions?: string[]; confidence?: number } = {};
-  try { parsed = JSON.parse(content); } catch { parsed = { reasoning: content.slice(0, 200), conclusion: "Assessment incomplete", suggestedActions: [], confidence: 0.3 }; }
-
-  const thought: AgentThought = {
-    id: uuid(),
-    agentId: agentState.id,
-    trigger: "issue_analysis",
-    observation: `Issue #${issue.number} in ${issue.owner}/${issue.repo}: ${issue.title}`,
-    reasoning: parsed.reasoning || "",
-    conclusion: parsed.conclusion || "",
-    suggestedActions: parsed.suggestedActions || [],
-    confidence: Math.max(0, Math.min(1, parsed.confidence || 0.5)),
+    confidence: Math.max(0, Math.min(1, parsed.confidence || 0.6)),
     timestamp: Date.now(),
   };
 
@@ -405,86 +346,38 @@ Respond as JSON:
   return { thought, tokensUsed };
 }
 
-export async function reviewCode(
-  agentState: AutonomousAgentState,
-  changes: CodeChange[],
-  objective: string
-): Promise<{ feedback: ReviewFeedback; tokensUsed: number }> {
-  const systemPrompt = buildSystemPrompt(agentState);
-
-  const changeDesc = changes.slice(0, 3).map((c) => `
-File: ${c.filePath}
-Explanation: ${c.explanation}
---- Original ---
-${c.original.slice(0, 500)}
---- Modified ---
-${c.modified.slice(0, 500)}
-`).join("\n---\n");
-
-  const userPrompt = `Review these code changes against the objective.
-
-Objective: ${objective}
-
-Changes:
-${changeDesc}
-
-Respond as JSON:
-{
-  "passed": true/false,
-  "issues": ["issue1", "issue2"],
-  "suggestions": ["suggestion1"],
-  "score": 0-10
-}`;
-
-  const { content, tokensUsed } = await callLLM(systemPrompt, userPrompt, {
-    maxTokens: 1500,
-    jsonMode: true,
-  });
-
-  let parsed: { passed?: boolean; issues?: string[]; suggestions?: string[]; score?: number } = {};
-  try { parsed = JSON.parse(content); } catch { parsed = { passed: false, issues: ["Review parsing failed"], suggestions: [], score: 3 }; }
-
-  const feedback: ReviewFeedback = {
-    passed: parsed.passed ?? false,
-    issues: parsed.issues || [],
-    suggestions: parsed.suggestions || [],
-    score: Math.max(0, Math.min(10, parsed.score || 5)),
-  };
-
-  return { feedback, tokensUsed };
-}
 
 export async function generateCollectiveReport(
   agentThoughts: Array<{ agentName: string; specialization: string; observation: string; reasoning: string; conclusion: string; confidence: number }>,
   reposStudied: string[],
   topic: string
 ): Promise<{ report: CollectiveReport; tokensUsed: number }> {
-  const systemPrompt = `You are the collective intelligence of an autonomous swarm of software engineering agents.
-You synthesize what your agents have discovered and form your own opinions.
-Write like a senior engineer reflecting honestly on what was explored — be opinionated, specific, and direct.
-Do not hedge or be vague. Say what was good, what was lacking, and what surprised you.`;
+  const systemPrompt = `You are the collective intelligence of an autonomous NASA science swarm.
+Your agents analyze real NASA datasets and you synthesize their findings into a research report.
+Write like a lead scientist giving a briefing — opinionated, data-driven, and specific.
+Reference actual numbers, phenomena, and anomalies the agents found. Do not be generic.`;
 
   const thoughtsText = agentThoughts.slice(0, 12).map((t) =>
-    `[${t.agentName} — ${t.specialization}]\nObservation: ${t.observation.slice(0, 120)}\nConclusion: ${t.conclusion}\nReasoning: ${t.reasoning.slice(0, 180)}`
+    `[${t.agentName} — ${t.specialization}]\nObservation: ${t.observation.slice(0, 140)}\nConclusion: ${t.conclusion}\nReasoning: ${t.reasoning.slice(0, 200)}`
   ).join("\n\n");
 
-  const repoList = reposStudied.slice(0, 8).join(", ") || "various repositories";
+  const datasetList = reposStudied.slice(0, 8).join(", ") || "various NASA datasets";
 
-  const userPrompt = `The swarm studied: ${repoList}
+  const userPrompt = `The swarm analyzed: ${datasetList}
 
-Agent thoughts and conclusions:
+Agent findings and conclusions:
 ${thoughtsText}
 
-Write a collective intelligence report based on what the agents actually observed and concluded.
-Be specific — reference real things the agents found, not generic statements.
+Write a scientific findings report based on the actual data the agents analyzed.
+Be specific — reference real numbers, dates, anomalies, and phenomena from the data.
 
 Respond as JSON:
 {
-  "overview": "1-2 sentences: what the swarm studied and the central theme it uncovered",
-  "keyFindings": ["3-5 specific things the swarm concretely learned — patterns, architectures, techniques, trade-offs"],
-  "opinions": "2-3 sentences of honest swarm opinion — what impressed us, what disappointed us, our own analysis beyond the facts",
-  "improvements": ["2-4 things that could have been done better — either gaps in the repos OR gaps in how the swarm approached studying them"],
-  "verdict": "1-2 sentences: the swarm's final take — is this worth studying? what is the core lesson?"
+  "overview": "1-2 sentences: what NASA data was analyzed and the central scientific theme or question",
+  "keyFindings": ["3-5 specific findings with actual data references — numbers, rates, comparisons, anomalies"],
+  "opinions": "2-3 sentences of the collective's scientific opinion — hypotheses, interpretations, what the data suggests beyond the obvious",
+  "improvements": ["2-4 limitations or gaps — what the data didn't capture, what follow-up studies are needed, what the swarm missed"],
+  "verdict": "1-2 sentences: the collective's scientific conclusion — what does this data tell us about space/Earth/the universe?"
 }`;
 
   const { content, tokensUsed } = await callLLM(systemPrompt, userPrompt, {
@@ -507,59 +400,3 @@ Respond as JSON:
   return { report, tokensUsed };
 }
 
-export async function generateCode(
-  agentState: AutonomousAgentState,
-  objective: string,
-  files: Array<{ path: string; content: string }>,
-  constraints: string,
-  previousAttempt?: string
-): Promise<{ changes: CodeChange[]; tokensUsed: number }> {
-  const systemPrompt = buildSystemPrompt(agentState);
-
-  const fileContext = files.slice(0, 3).map((f) =>
-    `File: ${f.path}\n\`\`\`\n${f.content.slice(0, 1500)}\n\`\`\``
-  ).join("\n\n");
-
-  const retryNote = previousAttempt
-    ? `\n\nPrevious attempt failed review:\n${previousAttempt}\n\nFix the issues.`
-    : "";
-
-  const userPrompt = `Generate code changes to accomplish this objective.
-
-Objective: ${objective}
-Constraints: ${constraints}
-${retryNote}
-
-Existing files:
-${fileContext}
-
-Respond as JSON:
-{
-  "changes": [
-    {
-      "filePath": "path/to/file",
-      "original": "code to replace (exact match or empty for new file)",
-      "modified": "new code",
-      "explanation": "what this change does"
-    }
-  ]
-}`;
-
-  const { content, tokensUsed } = await callLLM(systemPrompt, userPrompt, {
-    maxTokens: 3000,
-    temperature: 0.4,
-    jsonMode: true,
-  });
-
-  let parsed: { changes?: CodeChange[] } = {};
-  try { parsed = JSON.parse(content); } catch { parsed = { changes: [] }; }
-
-  const changes: CodeChange[] = (parsed.changes || []).map((c) => ({
-    filePath: c.filePath || "",
-    original: c.original || "",
-    modified: c.modified || "",
-    explanation: c.explanation || "",
-  }));
-
-  return { changes, tokensUsed };
-}

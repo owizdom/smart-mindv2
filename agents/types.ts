@@ -140,15 +140,25 @@ export interface DecisionResult {
   tokensUsed: number;
 }
 
+/** A real NASA/science dataset fetched and analyzed by an agent */
+export interface ScienceDataset {
+  id: string;
+  topic: string;           // e.g. "near_earth_objects"
+  subtopic: string;        // e.g. "Asteroid Close Approaches"
+  source: string;          // e.g. "NASA NeoWs API"
+  fetchedAt: number;
+  recordCount: number;
+  timeRange: string;
+  stats: Record<string, unknown>;
+  highlights: string[];    // Pre-computed notable findings
+  analysisContext: string; // JSON-serialized rich data for LLM reasoning
+}
+
 /** Discriminated union of possible agent actions */
 export type AgentAction =
-  | { type: "study_repo"; owner: string; repo: string; topic?: string }
-  | { type: "fix_issue"; owner: string; repo: string; issueNumber: number }
-  | { type: "write_code"; description: string; targetRepo?: string }
-  | { type: "refactor"; owner: string; repo: string; target: string }
-  | { type: "document"; owner: string; repo: string; target: string }
-  | { type: "share_technique"; technique: string; sourceRepo?: string }
-  | { type: "contribute_pr"; owner: string; repo: string; description: string }
+  | { type: "analyze_dataset"; topic: string }
+  | { type: "share_finding"; finding: string; topic?: string }
+  | { type: "correlate_findings"; topics: string[] }
   | { type: "explore_topic"; topic: string };
 
 /** A decision an agent makes about what to do */
@@ -164,99 +174,25 @@ export interface AgentDecision {
   completedAt: number | null;
 }
 
-/** A GitHub repository discovered by an agent */
-export interface GitHubRepo {
-  owner: string;
-  repo: string;
-  description: string;
-  language: string;
-  stars: number;
-  topics: string[];
-  relevanceScore: number;
-}
-
-/** A GitHub issue that an agent might work on */
-export interface GitHubIssue {
-  owner: string;
-  repo: string;
-  number: number;
-  title: string;
-  body: string;
-  labels: string[];
-  difficulty: "easy" | "medium" | "hard";
-  relevanceScore: number;
-}
-
-/** Rich context built from analyzing a repository */
-export interface RepoContext {
-  repo: GitHubRepo;
-  structure: string[];       // File tree paths
-  readmeExcerpt: string;
-  keyFiles: FileScore[];
-  issues: GitHubIssue[];
-  recentCommits: string[];
-}
-
-/** Scored file within a repo */
-export interface FileScore {
-  path: string;
-  score: number;
-  reason: string;
-  keySnippets: string[];
-}
 
 /** Output artifact from agent execution */
 export interface Artifact {
-  type: "code_change" | "pr_url" | "analysis" | "technique";
+  type: "finding" | "analysis" | "correlation";
   content: string;
-  filePath?: string;
-  prUrl?: string;
 }
 
-/** A code change produced by the executor */
-export interface CodeChange {
-  filePath: string;
-  original: string;
-  modified: string;
-  explanation: string;
-}
-
-/** Multi-step execution plan */
-export interface ExecutionPlan {
-  steps: string[];
-  status: "planning" | "implementing" | "reviewing" | "shipping" | "done" | "failed";
-  iteration: number;
-  maxIterations: number;
-}
-
-/** Feedback from self-review */
-export interface ReviewFeedback {
-  passed: boolean;
-  issues: string[];
-  suggestions: string[];
-  score: number; // 0-10
-}
-
-/** Engineering-enhanced pheromone with code/PR artifacts */
-export interface EngineeringPheromone extends Pheromone {
-  pheromoneType: "knowledge" | "code" | "pr" | "technique";
-  artifacts: Artifact[];
-  githubRefs: string[];    // "owner/repo" strings
-  codeSnippets: string[];
-}
-
-/** Extended agent state for autonomous engineering */
+/** Extended agent state for autonomous science */
 export interface AutonomousAgentState extends AgentState {
   thoughts: AgentThought[];
   decisions: AgentDecision[];
   currentDecision: AgentDecision | null;
-  reposStudied: string[];     // "owner/repo" strings
-  prsCreated: string[];       // PR URLs
+  reposStudied: string[];     // Re-used as datasetsAnalyzed (topic strings)
+  prsCreated: string[];       // Unused in science mode
   tokensUsed: number;
   tokenBudget: number;
   specialization: string;
   personality: AgentPersonality;
-  currentAction: string;      // Human-readable label e.g. "studying repo", "fixing issue"
+  currentAction: string;
 }
 
 /** Collaborative project detected among agents */

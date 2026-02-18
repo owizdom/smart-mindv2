@@ -4,7 +4,8 @@ import path from "path";
 import fs from "fs";
 import { SwarmState, AgentThought, AgentDecision, CollaborativeProject, Pheromone, hash } from "../agents/types";
 import { SwarmAgent } from "../agents/agent";
-import { getRecentThoughts, getRecentDecisions, getAllRepos, getAgentStats } from "../agents/persistence";
+import { getRecentThoughts, getRecentDecisions, getAgentStats, getRecentPheromones, getCollectiveMemories } from "../agents/persistence";
+import { isEnabled as eigenDAEnabled } from "../agents/eigenda";
 import { v4 as uuid } from "uuid";
 
 interface EnhancedState {
@@ -125,34 +126,28 @@ export function startDashboard(
     }
   });
 
+  // Returns datasets analyzed by agents (reposStudied repurposed as datasetsAnalyzed)
   app.get("/api/repos", (_req, res) => {
-    try {
-      res.json(getAllRepos());
-    } catch {
-      // Deduplicate from agent state
-      const seen = new Set<string>();
-      const repos: Array<{ owner: string; repo: string }> = [];
-      for (const agent of agents) {
-        for (const repoStr of agent.state.reposStudied) {
-          if (!seen.has(repoStr)) {
-            seen.add(repoStr);
-            const [owner, repo] = repoStr.split("/");
-            repos.push({ owner, repo });
-          }
+    const seen = new Set<string>();
+    const datasets: Array<{ topic: string; timeRange: string; studiedBy: string[] }> = [];
+    for (const agent of agents) {
+      for (const entry of agent.state.reposStudied) {
+        if (!seen.has(entry)) {
+          seen.add(entry);
+          const [topic, ...rest] = entry.split(":");
+          datasets.push({ topic: topic.replace(/_/g, " "), timeRange: rest.join(":") || "recent", studiedBy: [] });
         }
+        // Add agent name to studiedBy
+        const ds = datasets.find((d) => d.topic === entry.split(":")[0].replace(/_/g, " "));
+        if (ds && !ds.studiedBy.includes(agent.state.name)) ds.studiedBy.push(agent.state.name);
       }
-      res.json(repos);
     }
+    res.json(datasets);
   });
 
+  // Findings shared by agents (prsCreated unused in science mode)
   app.get("/api/prs", (_req, res) => {
-    const prs: Array<{ agentName: string; url: string }> = [];
-    for (const agent of agents) {
-      for (const url of agent.state.prsCreated) {
-        prs.push({ agentName: agent.state.name, url });
-      }
-    }
-    res.json(prs);
+    res.json([]);
   });
 
   app.get("/api/agent/:id", (req, res) => {
@@ -242,6 +237,45 @@ export function startDashboard(
       reposStudied: [...repoSet.values()],
       collectiveMemories: state.collectiveMemories,
     });
+  });
+
+  // ── EigenDA / Attestation Status ──
+
+  app.get("/api/da-status", (_req, res) => {
+    try {
+      const pheromones = getRecentPheromones(100);
+      const memories = getCollectiveMemories();
+
+      const attestedPheromones = pheromones.filter((p) => p.eigendaCommitment);
+      const attestedMemories = memories.filter((m) => m.eigendaCommitment);
+
+      res.json({
+        enabled: eigenDAEnabled(),
+        proxyUrl: process.env.EIGENDA_PROXY_URL || null,
+        pheromones: {
+          total: pheromones.length,
+          attested: attestedPheromones.length,
+          latest: attestedPheromones.slice(0, 5).map((p) => ({
+            id: p.id,
+            domain: p.domain,
+            commitment: p.eigendaCommitment,
+            timestamp: p.timestamp,
+          })),
+        },
+        collectiveMemories: {
+          total: memories.length,
+          attested: attestedMemories.length,
+          items: attestedMemories.map((m) => ({
+            id: m.id,
+            domain: m.domain,
+            commitment: m.eigendaCommitment,
+            timestamp: m.timestamp,
+          })),
+        },
+      });
+    } catch {
+      res.json({ enabled: eigenDAEnabled(), proxyUrl: process.env.EIGENDA_PROXY_URL || null, pheromones: { total: 0, attested: 0, latest: [] }, collectiveMemories: { total: 0, attested: 0, items: [] } });
+    }
   });
 
   // Inject a human pheromone into the swarm channel

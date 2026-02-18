@@ -17,21 +17,21 @@ import {
 import { SwarmAgent } from "./agent";
 import { startDashboard } from "../dashboard/server";
 import { initThinker, getTotalTokensUsed, generateCollectiveReport } from "./thinker";
-import { initDatabase, closeDatabase, saveAgent, getRecentThoughts, getRecentDecisions, getAllRepos } from "./persistence";
+import { initDatabase, closeDatabase, saveAgent, getRecentThoughts, getRecentDecisions, saveCollectiveMemory } from "./persistence";
+import { isEnabled as eigenDAEnabled } from "./eigenda";
 import { detectCollaborativeOpportunity } from "./decider";
 import { v4 as uuid } from "uuid";
 
 /**
- * EMERGENT SWARM MIND v2.0
+ * EMERGENT SWARM MIND v2.0 — NASA Science Mode
  *
- * Autonomous Engineering Collective
+ * Autonomous Scientific Research Collective
  *
- * Agents explore the internet, discover GitHub repos, form independent
- * engineering thoughts, decide what to build/fix/contribute, and execute
- * actual code changes — all without central coordination.
+ * Agents fetch real NASA datasets (asteroids, solar flares, exoplanets,
+ * Earth events, Mars weather), form scientific hypotheses, share findings
+ * via pheromones, and collectively synthesize research reports.
  *
- * Progressive engagement: exploration → engineering.
- * Sandbox by default: all code changes are local until user approves.
+ * No GitHub. No code. Pure science.
  */
 
 const SWARM_SIZE = parseInt(process.env.SWARM_SIZE || "6");
@@ -264,9 +264,9 @@ let isShuttingDown = false;
 
 async function main() {
   console.log("╔═══════════════════════════════════════════════════╗");
-  console.log("║       EMERGENT SWARM MIND  v2.0.0                 ║");
-  console.log("║  Autonomous Engineering Collective                ║");
-  console.log("║  No leader. No coordinator. Just emergence.       ║");
+  console.log("║        SWARM MIND         ║");
+  console.log("║  Autonomous Scientific Research Collective        ║");
+  console.log("║  Asteroids · Solar Flares · Exoplanets · Mars     ║");
   console.log("╚═══════════════════════════════════════════════════╝");
   console.log();
 
@@ -412,6 +412,8 @@ async function main() {
         console.log(
           `  [COLLECTIVE] New shared memory: "${memory.topic}" (${memory.contributors.length} contributors, confidence ${memory.confidence.toFixed(2)})`
         );
+        // Anchor collective memory to EigenDA for decentralized attestation
+        try { saveCollectiveMemory(memory); } catch { /* DB not ready */ }
       }
     }
 
