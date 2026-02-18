@@ -11,8 +11,9 @@ version: "3.9"
 # Shared environment for all agents
 x-common-env: &common-env
   LLM_PROVIDER:           ${LLM_PROVIDER:-anthropic}
+  ANTHROPIC_BASE_URL:     ${ANTHROPIC_BASE_URL:-}
   ANTHROPIC_API_KEY:      ${ANTHROPIC_API_KEY:-}
-  ANTHROPIC_MODEL:        ${ANTHROPIC_MODEL:-claude-sonnet-4-5}
+  ANTHROPIC_MODEL:        ${ANTHROPIC_MODEL:-claude-opus-4-6}
   EIGENAI_API_KEY:        ${EIGENAI_API_KEY:-}
   EIGENAI_API_URL:        ${EIGENAI_API_URL:-https://api.eigenai.xyz/v1}
   EIGENAI_MODEL:          ${EIGENAI_MODEL:-gpt-oss-120b-f16}

@@ -26,10 +26,10 @@ import path from "path";
 import fs from "fs";
 import { SwarmAgent } from "./agent";
 import { initDatabase, saveAgent, savePheromone, saveThought, closeDatabase } from "./persistence";
-import { initThinker, getTotalTokensUsed } from "./thinker";
+import { initThinker, getTotalTokensUsed, generateCollectiveReport } from "./thinker";
 import { isEnabled as eigenDAEnabled } from "./eigenda";
 import { verifyAttestation } from "./keystore";
-import type { Pheromone, PheromoneChannel, LLMConfig } from "./types";
+import type { Pheromone, PheromoneChannel, LLMConfig, CollectiveMemory } from "./types";
 import { v4 as uuid } from "uuid";
 import { hash } from "./types";
 
@@ -52,7 +52,7 @@ function initLLM(): boolean {
 
   switch (provider) {
     case "anthropic":
-      config = { provider: "anthropic", apiUrl: "", apiKey: process.env.ANTHROPIC_API_KEY || "", model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514" };
+      config = { provider: "anthropic", apiUrl: "", apiKey: process.env.ANTHROPIC_API_KEY || "", model: process.env.ANTHROPIC_MODEL || "claude-opus-4-6" };
       break;
     case "openai":
       config = { provider: "openai", apiUrl: process.env.OPENAI_API_URL || "https://api.openai.com/v1", apiKey: process.env.OPENAI_API_KEY || "", model: process.env.OPENAI_MODEL || "gpt-4o" };
@@ -79,6 +79,75 @@ const channel: PheromoneChannel = {
 };
 
 let step = 0;
+const collectiveMemories: CollectiveMemory[] = [];
+
+// ── Collective report generation (triggered at phase transition) ──
+async function generateCollectiveMemory(): Promise<void> {
+  try {
+    const agentThoughts = agent.state.thoughts.slice(-15).map(t => ({
+      agentName:      agent.state.name,
+      specialization: agent.state.specialization,
+      observation:    t.observation,
+      reasoning:      t.reasoning,
+      conclusion:     t.conclusion,
+      confidence:     t.confidence,
+    }));
+
+    // Include peer pheromone content as proxy for other agents' findings
+    const peerThoughts = channel.pheromones
+      .filter(p => p.agentId !== agent.state.id && p.strength > 0.25)
+      .slice(0, 10)
+      .map(p => ({
+        agentName:      p.agentId.slice(0, 8),
+        specialization: p.domain,
+        observation:    p.content.slice(0, 120),
+        reasoning:      "",
+        conclusion:     p.content,
+        confidence:     p.confidence,
+      }));
+
+    const allThoughts = [...agentThoughts, ...peerThoughts];
+    const datasets = agent.state.reposStudied.length > 0
+      ? agent.state.reposStudied
+      : channel.pheromones.map(p => p.domain).filter((d, i, a) => a.indexOf(d) === i);
+
+    if (allThoughts.length === 0) return;
+
+    const { report, tokensUsed } = await generateCollectiveReport(
+      allThoughts,
+      datasets,
+      "NASA Science Collective Intelligence"
+    );
+
+    agent.state.tokensUsed += tokensUsed;
+
+    const synthesis = [
+      report.overview,
+      "",
+      "Key Findings:",
+      ...report.keyFindings.map(f => `• ${f}`),
+      "",
+      report.opinions,
+    ].join("\n");
+
+    const memory: CollectiveMemory = {
+      id:            uuid(),
+      topic:         "NASA Science Collective",
+      synthesis,
+      contributors:  [agent.state.id],
+      pheromoneIds:  channel.pheromones.map(p => p.id),
+      confidence:    0.85,
+      attestation:   hash(report.overview + report.verdict),
+      createdAt:     Date.now(),
+      report,
+    };
+
+    collectiveMemories.push(memory);
+    console.log(`  [${agent.state.name}] Collective memory generated — ${report.keyFindings.length} findings`);
+  } catch (err) {
+    console.error(`  [${agent.state.name}] Collective report error:`, err);
+  }
+}
 
 // ── Gossip: push to peers ──
 async function pushToPeers(pheromone: Pheromone): Promise<void> {
@@ -203,6 +272,10 @@ app.get("/attestation", (_, res) => {
   res.json(proof);
 });
 
+app.get("/collective", (_, res) => {
+  res.json(collectiveMemories);
+});
+
 // Receive pheromone pushed by a peer
 app.post("/pheromone", (req, res) => {
   const p = req.body as Pheromone;
@@ -251,6 +324,9 @@ async function run(): Promise<void> {
         console.log(`█  [${agent.state.name}] PHASE TRANSITION DETECTED — step ${step}`);
         console.log(`█  Density: ${channel.density.toFixed(3)} | Pheromones: ${channel.pheromones.length}`);
         console.log(`${"█".repeat(50)}\n`);
+
+        // Generate collective memory (fire-and-forget — doesn't block the loop)
+        generateCollectiveMemory().catch(() => {});
       }
     }
 

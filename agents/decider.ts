@@ -97,7 +97,7 @@ export function generateCandidateDecisions(
     const action: AgentAction = {
       type: "share_finding",
       finding: bestThought.conclusion.slice(0, 80),
-      topic: bestThought.trigger.split(":")[1],
+      topic: bestThought.trigger.split(":")[1] ?? state.explorationTarget,
     };
     const cost = estimateCost(action);
     if (cost.estimatedTokens <= budgetRemaining) {

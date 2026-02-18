@@ -129,12 +129,15 @@ app.get("/api/state", async (_req, res) => {
   });
 });
 
-// Collective memories (synthesized by whichever agent holds them)
+// Collective memories — each agent generates its own at phase transition
 app.get("/api/collective", async (_req, res) => {
-  const states = await fetchAllAgents("/state") as Array<Record<string, unknown>>;
-  const memories = states
-    .filter(Boolean)
-    .flatMap(s => (s?.collectiveMemories as unknown[]) || []);
+  const all = await fetchAllAgents("/collective");
+  const seen = new Set<string>();
+  const memories: unknown[] = [];
+  for (const m of all.flat() as Array<{ id: string; createdAt: number }>) {
+    if (m?.id && !seen.has(m.id)) { seen.add(m.id); memories.push(m); }
+  }
+  memories.sort((a, b) => ((b as { createdAt: number }).createdAt || 0) - ((a as { createdAt: number }).createdAt || 0));
   res.json(memories);
 });
 

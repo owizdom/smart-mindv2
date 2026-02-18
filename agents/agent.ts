@@ -14,7 +14,7 @@ import { fetchDataset, getRandomTopic } from "./science";
 import { formThought, synthesizeKnowledge } from "./thinker";
 import { generateCandidateDecisions, selectDecision, shouldSwitch } from "./decider";
 import { executeDecision } from "./executor";
-import { saveThought, saveDecision, updateDecisionStatus, savePheromone } from "./persistence";
+import { saveThought, saveDecision, updateDecisionStatus } from "./persistence";
 
 /**
  * Swarm Science Agent
@@ -266,9 +266,10 @@ export class SwarmAgent {
     decision: AgentDecision,
     result: { summary: string; artifacts: Array<{ type: string; content: string }> }
   ): Pheromone {
-    const topic = "topic" in decision.action
-      ? (decision.action as { topic: string }).topic
-      : this.state.explorationTarget;
+    const rawTopic = "topic" in decision.action
+      ? (decision.action as { topic?: string }).topic
+      : undefined;
+    const topic = rawTopic || this.state.explorationTarget;
 
     const ts = Date.now();
     const pheromone: Pheromone = {
@@ -286,9 +287,6 @@ export class SwarmAgent {
 
     this.state.knowledge.push(pheromone);
     this.state.discoveries++;
-
-    // Persist to SQLite + disperse to EigenDA for decentralized attestation
-    try { savePheromone(pheromone); } catch { /* DB not ready */ }
     return pheromone;
   }
 
@@ -342,7 +340,6 @@ export class SwarmAgent {
 
       this.state.knowledge.push(pheromone);
       this.state.discoveries++;
-      try { savePheromone(pheromone); } catch { /* DB not ready */ }
       return pheromone;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
