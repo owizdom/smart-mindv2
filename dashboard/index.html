@@ -5,369 +5,522 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Swarm Mind</title>
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Press+Start+2P&display=swap');
+
     :root {
-      --bg: #f8f9fb;
-      --surface: #ffffff;
-      --border: #e8eaed;
-      --border-soft: #f0f2f5;
-      --text: #111827;
-      --text-2: #6b7280;
-      --text-3: #9ca3af;
-      --accent: #6366f1;
-      --accent-soft: #eef2ff;
-      --green: #10b981;
-      --green-soft: #d1fae5;
-      --amber: #f59e0b;
-      --amber-soft: #fef3c7;
-      --pink: #ec4899;
-      --pink-soft: #fce7f3;
-      --blue: #3b82f6;
-      --radius: 10px;
-      --radius-sm: 6px;
-      --shadow: 0 1px 3px rgba(0,0,0,0.06),0 1px 2px rgba(0,0,0,0.04);
-      --shadow-md: 0 4px 12px rgba(0,0,0,0.08);
-      --shadow-lg: 0 8px 24px rgba(0,0,0,0.12);
+      --bg:          #b0bcc8;
+      --surface:     #c4d0dc;
+      --surface-2:   #d4dfe8;
+      --border:      #8898aa;
+      --border-soft: #a0aab8;
+      --text:        #161c28;
+      --text-2:      #344060;
+      --text-3:      #6070a0;
+      --accent:      #1e3898;
+      --accent-dim:  rgba(30,56,152,0.12);
+      --accent-glow: rgba(30,56,152,0.28);
+      --green:       #0a6822;
+      --green-dim:   rgba(10,104,34,0.14);
+      --amber:       #985200;
+      --amber-dim:   rgba(152,82,0,0.13);
+      --pink:        #881050;
+      --red:         #aa1818;
+      --red-dim:     rgba(170,24,24,0.13);
+      --radius:      10px;
+      --radius-sm:   6px;
     }
+
     * { margin:0; padding:0; box-sizing:border-box; }
+
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
       background: var(--bg); color: var(--text);
       height: 100vh; overflow: hidden; font-size: 13px;
     }
-    .app { display:grid; grid-template-rows:52px 1fr; height:100vh; }
+
+    .mono { font-family: 'JetBrains Mono', monospace; }
+
+    .app { display:grid; grid-template-rows:48px 1fr; height:100vh; }
 
     /* ── Header ── */
     .header {
-      background: var(--surface); border-bottom:1px solid var(--border);
-      display:flex; align-items:center; padding:0 20px; gap:16px;
-      box-shadow: var(--shadow); z-index:20;
-    }
-    .brand { display:flex; align-items:center; gap:8px; font-weight:700; font-size:14px; white-space:nowrap; }
-    .brand-dot { width:8px; height:8px; border-radius:50%; background:var(--accent); animation:pulse 2s infinite; }
-    @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.6;transform:scale(.85)} }
-    .header-pills { display:flex; gap:6px; flex:1; }
-    .pill {
-      display:flex; align-items:center; gap:5px;
-      padding:4px 10px; border-radius:20px; font-size:11.5px; font-weight:500;
-      background:var(--bg); border:1px solid var(--border); color:var(--text-2); white-space:nowrap;
-    }
-    .pill .val { font-weight:700; color:var(--text); }
-    .pill.accent { background:var(--accent-soft); border-color:#c7d2fe; color:var(--accent); }
-    .pill.accent .val { color:var(--accent); }
-    .pill.green { background:var(--green-soft); border-color:#a7f3d0; }
-    .pill.green .val { color:var(--green); }
-    .pill.amber { background:var(--amber-soft); border-color:#fde68a; }
-    .pill.amber .val { color:var(--amber); }
-    .transition-badge {
-      display:none; padding:4px 12px; border-radius:20px;
-      background:linear-gradient(135deg,var(--accent),var(--pink));
-      color:white; font-size:11px; font-weight:600; letter-spacing:.5px;
-      animation:glow 1.5s ease-in-out infinite alternate;
-    }
-    @keyframes glow {
-      from { box-shadow:0 0 8px rgba(99,102,241,.4); }
-      to   { box-shadow:0 0 16px rgba(236,72,153,.5); }
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; padding: 0 18px; gap: 14px;
+      z-index: 20;
     }
 
-    /* ── Inject bar ── */
+    .brand {
+      display: flex; align-items: center; gap: 8px;
+      font-weight: 700; font-size: 13px; white-space: nowrap;
+      color: var(--text); letter-spacing: .3px;
+    }
+    .mc { font-family: 'Press Start 2P', monospace; }
+    .brand-mark {
+      width: 22px; height: 22px; border-radius: 6px;
+      background: linear-gradient(135deg, var(--accent), var(--pink));
+      display: flex; align-items: center; justify-content: center;
+      font-size: 10px; font-weight: 800; color: white;
+      box-shadow: 0 0 12px var(--accent-glow);
+    }
+
+    .header-stats { display: flex; gap: 4px; flex: 1; overflow: hidden; }
+
+    .stat-chip {
+      display: flex; align-items: center; gap: 5px;
+      padding: 3px 10px; border-radius: 20px;
+      background: var(--surface-2); border: 1px solid var(--border);
+      color: var(--text-2); font-size: 11.5px; white-space: nowrap;
+      transition: border-color .3s, color .3s;
+    }
+    .stat-chip .v { font-weight: 700; color: var(--text); font-family: 'JetBrains Mono', monospace; }
+    .stat-chip.active { border-color: var(--accent); color: var(--accent); }
+    .stat-chip.active .v { color: var(--accent); }
+    .stat-chip.green  { border-color: var(--green); }
+    .stat-chip.green .v { color: var(--green); }
+
+    .phase-badge {
+      display: none; padding: 3px 12px; border-radius: 20px;
+      background: linear-gradient(90deg, var(--accent), var(--pink));
+      color: white; font-size: 11px; font-weight: 600; letter-spacing: .4px;
+      animation: pulseBadge 2s ease-in-out infinite;
+    }
+    @keyframes pulseBadge {
+      0%,100% { box-shadow: 0 0 8px var(--accent-glow); }
+      50%      { box-shadow: 0 0 20px rgba(236,72,153,.5); }
+    }
+
     .inject-wrap {
-      display:flex; align-items:center; gap:6px;
-      border-left:1px solid var(--border); padding-left:16px;
+      display: flex; align-items: center; gap: 6px;
+      border-left: 1px solid var(--border); padding-left: 14px;
     }
     .inject-input {
-      padding:5px 10px; border-radius:20px; border:1px solid var(--border);
-      font-size:12px; outline:none; width:180px; background:var(--bg);
-      transition:border .2s, box-shadow .2s;
+      padding: 5px 11px; border-radius: 20px;
+      border: 1px solid var(--border); background: var(--surface-2);
+      color: var(--text); font-size: 12px; outline: none; width: 170px;
+      font-family: inherit; transition: border .2s, box-shadow .2s;
     }
-    .inject-input:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(99,102,241,.15); }
+    .inject-input::placeholder { color: var(--text-3); }
+    .inject-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
     .inject-btn {
-      padding:5px 14px; border-radius:20px; border:none; cursor:pointer;
-      background:var(--accent); color:white; font-size:12px; font-weight:600;
-      transition:opacity .15s, transform .1s;
+      padding: 5px 14px; border-radius: 20px; border: none; cursor: pointer;
+      background: var(--accent); color: white; font-size: 12px; font-weight: 600;
+      font-family: inherit; transition: opacity .15s, box-shadow .15s;
     }
-    .inject-btn:hover { opacity:.88; }
-    .inject-btn:active { transform:scale(.96); }
-    .inject-feedback {
-      font-size:11px; color:var(--green); font-weight:600;
-      opacity:0; transition:opacity .3s;
+    .inject-btn:hover { opacity: .85; box-shadow: 0 0 12px var(--accent-glow); }
+    .inject-ok {
+      font-size: 11px; color: var(--green); font-weight: 600;
+      opacity: 0; transition: opacity .3s;
     }
-    .inject-feedback.show { opacity:1; }
+    .inject-ok.show { opacity: 1; }
 
-    /* ── Body layout ── */
-    .body { display:grid; grid-template-columns:192px 1fr; overflow:hidden; }
+    /* ── Layout ── */
+    .body { display: grid; grid-template-columns: 180px 1fr; overflow: hidden; }
 
-    /* ── Tabs sidebar ── */
+    /* ── Sidebar tabs ── */
     .tabs {
-      background:var(--surface); border-right:1px solid var(--border);
-      padding:12px 8px; display:flex; flex-direction:column; gap:2px;
+      background: var(--surface); border-right: 1px solid var(--border);
+      padding: 10px 8px; display: flex; flex-direction: column; gap: 1px;
     }
-    .tab-section-label {
-      font-size:10px; font-weight:600; color:var(--text-3);
-      text-transform:uppercase; letter-spacing:.8px; padding:10px 12px 4px;
+    .tab-group-label {
+      font-size: 9.5px; font-weight: 600; color: var(--text-3);
+      text-transform: uppercase; letter-spacing: .9px; padding: 10px 10px 4px;
     }
     .tab-btn {
-      display:flex; align-items:center; gap:9px; padding:8px 12px;
-      border-radius:var(--radius-sm); cursor:pointer; border:none;
-      background:none; color:var(--text-2); font-size:13px; font-weight:500;
-      width:100%; text-align:left; transition:all .15s;
+      display: flex; align-items: center; gap: 9px; padding: 7px 10px;
+      border-radius: var(--radius-sm); cursor: pointer; border: none;
+      background: none; color: var(--text-2); font-size: 12.5px; font-weight: 500;
+      width: 100%; text-align: left; transition: all .15s; font-family: inherit;
     }
-    .tab-btn:hover { background:var(--bg); color:var(--text); }
-    .tab-btn.active { background:var(--accent-soft); color:var(--accent); }
-    .tab-icon { font-size:15px; width:18px; text-align:center; }
+    .tab-btn:hover { background: var(--surface-2); color: var(--text); }
+    .tab-btn.active { background: var(--accent-dim); color: var(--accent); border: 1px solid rgba(99,102,241,.2); }
+    .tab-icon { width: 16px; text-align: center; font-size: 14px; opacity: .7; }
 
-    /* ── Content panels ── */
-    .content { overflow:hidden; position:relative; }
-    .tab-panel { display:none; height:100%; overflow:hidden; }
-    .tab-panel.active { display:flex; flex-direction:column; }
+    /* ── Content ── */
+    .content { overflow: hidden; position: relative; }
+    .tab-panel { display: none; height: 100%; overflow: hidden; }
+    .tab-panel.active { display: flex; flex-direction: column; }
 
-    /* ── Live layout ── */
-    .live-layout { display:grid; grid-template-columns:1fr 300px; height:100%; overflow:hidden; }
-    .canvas-wrap { position:relative; background:#fafbfc; overflow:hidden; cursor:crosshair; }
-    canvas { width:100%; height:100%; }
+    /* ── Live view ── */
+    .live-layout { display: grid; grid-template-columns: 1fr 280px; height: 100%; }
+    .canvas-wrap { position: relative; overflow: hidden; background: var(--bg); }
+    canvas { width: 100%; height: 100%; display: block; }
 
-    /* density bar */
-    .density-bar-wrap { position:absolute; bottom:16px; left:16px; right:16px; }
-    .density-label-row { display:flex; justify-content:space-between; font-size:10.5px; color:var(--text-3); margin-bottom:4px; }
-    .density-track { height:5px; background:var(--border); border-radius:3px; overflow:visible; position:relative; }
-    .density-fill { height:100%; border-radius:3px; transition:width .6s ease, background .4s; }
-    .density-threshold-marker { position:absolute; top:-3px; width:2px; height:11px; background:var(--pink); border-radius:1px; }
+    .density-wrap {
+      position: absolute; bottom: 14px; left: 14px; right: 14px;
+    }
+    .density-row { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-3); margin-bottom: 4px; font-family: 'JetBrains Mono', monospace; }
+    .density-track { height: 3px; background: var(--border); border-radius: 2px; position: relative; }
+    .density-fill { height: 100%; border-radius: 2px; transition: width .8s cubic-bezier(.4,0,.2,1), background .5s; }
+    .density-marker { position: absolute; top: -4px; width: 1px; height: 11px; background: var(--pink); border-radius: 1px; opacity: .7; }
 
     .flash-overlay {
-      position:absolute; inset:0;
-      background:radial-gradient(circle at center, rgba(99,102,241,.15), transparent 70%);
-      pointer-events:none; opacity:0;
+      position: absolute; inset: 0; pointer-events: none; opacity: 0;
+      background: radial-gradient(circle at center, rgba(99,102,241,.18), transparent 65%);
     }
-    .flash-overlay.active { animation:flashAnim 2s ease-out forwards; }
+    .flash-overlay.go { animation: flashAnim 2.5s ease-out forwards; }
     @keyframes flashAnim { 0%{opacity:1} 100%{opacity:0} }
 
-    /* ── Focus panel overlay (right of canvas on click) ── */
-    .focus-overlay {
-      position:absolute; top:12px; left:12px; width:280px;
-      background:var(--surface); border:1px solid var(--border);
-      border-radius:var(--radius); box-shadow:var(--shadow-lg);
-      padding:14px; z-index:10; transition:opacity .2s, transform .2s;
-      opacity:0; pointer-events:none; transform:translateY(4px);
-      max-height:calc(100% - 80px); overflow-y:auto;
+    .focus-panel {
+      position: absolute; top: 12px; left: 12px; width: 260px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 14px; z-index: 10;
+      opacity: 0; pointer-events: none; transform: translateY(6px);
+      transition: opacity .2s, transform .2s;
+      max-height: calc(100% - 80px); overflow-y: auto;
     }
-    .focus-overlay.visible { opacity:1; pointer-events:auto; transform:translateY(0); }
+    .focus-panel.open { opacity: 1; pointer-events: auto; transform: translateY(0); }
     .focus-close {
-      position:absolute; top:10px; right:10px; width:22px; height:22px;
-      border-radius:50%; border:none; background:var(--bg); cursor:pointer;
-      font-size:12px; color:var(--text-2); display:flex; align-items:center; justify-content:center;
+      position: absolute; top: 10px; right: 10px; width: 20px; height: 20px;
+      border-radius: 50%; border: none; background: var(--surface-2);
+      cursor: pointer; font-size: 11px; color: var(--text-2);
+      display: flex; align-items: center; justify-content: center; font-family: inherit;
     }
-    .focus-close:hover { background:var(--border); }
-    .focus-agent-header { display:flex; align-items:center; gap:10px; margin-bottom:12px; }
-    .focus-avatar { width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; color:white; flex-shrink:0; }
-    .focus-name { font-weight:700; font-size:13px; }
-    .focus-spec { font-size:11px; color:var(--text-3); }
-    .focus-section { margin-bottom:10px; }
-    .focus-section-title { font-size:10px; font-weight:600; color:var(--text-3); text-transform:uppercase; letter-spacing:.6px; margin-bottom:6px; }
+    .focus-close:hover { background: var(--border); color: var(--text); }
+    .focus-head { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+    .focus-av { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: white; flex-shrink: 0; }
+    .focus-name { font-weight: 700; font-size: 13px; }
+    .focus-sub { font-size: 10.5px; color: var(--text-3); margin-top: 1px; }
+    .focus-stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; margin-bottom: 10px; }
+    .focus-stat { text-align: center; background: var(--surface-2); border-radius: var(--radius-sm); padding: 6px; }
+    .focus-stat-val { font-size: 17px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+    .focus-stat-lbl { font-size: 9px; color: var(--text-3); text-transform: uppercase; margin-top: 1px; }
+    .focus-bar-track { height: 3px; background: var(--border); border-radius: 2px; margin-bottom: 10px; overflow: hidden; }
+    .focus-bar-fill { height: 100%; border-radius: 2px; background: linear-gradient(90deg, var(--accent), var(--pink)); transition: width .5s; }
+    .focus-section-title { font-size: 9.5px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 6px; }
     .focus-thought {
-      padding:7px 9px; border-radius:var(--radius-sm); border:1px solid var(--border);
-      margin-bottom:4px; font-size:11.5px; color:var(--text-2); line-height:1.5;
-      background:var(--bg);
+      padding: 6px 8px; border-radius: var(--radius-sm); margin-bottom: 4px;
+      font-size: 11px; color: var(--text-2); line-height: 1.5;
+      background: var(--surface-2); border: 1px solid var(--border);
     }
-    .focus-thought-conf { font-size:10px; color:var(--green); font-weight:600; float:right; }
-    .focus-repo-tag {
-      display:inline-block; padding:2px 8px; border-radius:10px;
-      background:var(--accent-soft); border:1px solid #c7d2fe;
-      color:var(--accent); font-size:10.5px; margin:2px;
+    .focus-conf { font-size: 9.5px; color: var(--green); font-weight: 600; float: right; font-family: 'JetBrains Mono', monospace; }
+    .focus-tag {
+      display: inline-block; padding: 1px 7px; border-radius: 8px; margin: 2px;
+      background: var(--accent-dim); border: 1px solid rgba(99,102,241,.2);
+      color: var(--accent); font-size: 10px;
     }
-    .focus-stat-row { display:flex; gap:8px; margin-bottom:8px; }
-    .focus-stat { flex:1; text-align:center; background:var(--bg); border-radius:var(--radius-sm); padding:6px; }
-    .focus-stat-val { font-size:18px; font-weight:700; }
-    .focus-stat-lbl { font-size:9.5px; color:var(--text-3); text-transform:uppercase; }
+    .focus-action { font-size: 10px; color: var(--text-3); margin-top: 6px; font-style: italic; }
 
-    /* ── Sidebar ── */
-    .sidebar {
-      border-left:1px solid var(--border); overflow-y:auto;
-      padding:12px; background:var(--surface); display:flex; flex-direction:column; gap:14px;
+    /* ── Right sidebar ── */
+    .live-sidebar {
+      border-left: 1px solid var(--border); overflow-y: auto;
+      padding: 12px; background: var(--surface); display: flex; flex-direction: column; gap: 14px;
     }
-    .section-title { font-size:11px; font-weight:600; color:var(--text-3); text-transform:uppercase; letter-spacing:.6px; margin-bottom:8px; }
+    .section-label { font-size: 10px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: .7px; margin-bottom: 7px; }
 
-    /* Agent rows */
     .agent-row {
-      display:flex; align-items:center; gap:8px; padding:6px 8px;
-      border-radius:var(--radius-sm); background:var(--bg); margin-bottom:4px;
-      cursor:pointer; transition:all .15s; border:1px solid transparent;
+      display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+      border-radius: var(--radius-sm); background: var(--surface-2);
+      margin-bottom: 3px; cursor: pointer; border: 1px solid transparent;
+      transition: border-color .2s, background .2s;
     }
-    .agent-row:hover { border-color:var(--border); box-shadow:var(--shadow); }
-    .agent-row.focused { background:var(--accent-soft); border-color:#c7d2fe; }
-    .agent-row.synced { background:var(--green-soft); }
-    .agent-avatar { width:26px; height:26px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:700; color:white; flex-shrink:0; }
-    .agent-info { flex:1; min-width:0; }
-    .agent-name { font-weight:600; font-size:12px; }
-    .agent-action-text { font-size:10.5px; color:var(--text-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-    .agent-discoveries { font-size:11px; font-weight:600; color:var(--text-2); }
+    .agent-row:hover { border-color: var(--border); }
+    .agent-row.focused { background: var(--accent-dim); border-color: rgba(99,102,241,.25); }
+    .agent-row.synced { background: var(--green-dim); border-color: rgba(16,185,129,.2); }
+    .agent-av { width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; font-weight: 700; color: white; flex-shrink: 0; }
+    .agent-info { flex: 1; min-width: 0; }
+    .agent-name { font-weight: 600; font-size: 12px; }
+    .agent-action { font-size: 10px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .agent-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; }
+    .agent-disc { font-size: 11px; font-weight: 600; color: var(--text-2); font-family: 'JetBrains Mono', monospace; }
+    .agent-cr { display: flex; align-items: center; gap: 2px; font-size: 9.5px; color: var(--text-3); font-family: 'JetBrains Mono', monospace; }
+    .cr-dot { width: 5px; height: 5px; border-radius: 50%; }
 
-    /* Thought cards */
-    .thought-card { padding:8px 10px; border-radius:var(--radius-sm); border:1px solid var(--border); margin-bottom:6px; background:var(--bg); }
-    .thought-meta { display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
-    .thought-agent-name { font-weight:600; font-size:11.5px; }
-    .confidence-badge { font-size:10px; padding:1px 6px; border-radius:10px; background:var(--green-soft); color:var(--green); font-weight:600; }
-    .thought-text { font-size:11.5px; color:var(--text-2); line-height:1.5; }
+    .thought-card {
+      padding: 8px 10px; border-radius: var(--radius-sm);
+      border: 1px solid var(--border); background: var(--surface-2); margin-bottom: 5px;
+    }
+    .thought-meta { display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px; }
+    .thought-who { font-weight: 600; font-size: 11px; }
+    .conf-badge { font-size: 9.5px; padding: 1px 6px; border-radius: 8px; background: var(--green-dim); color: var(--green); font-weight: 600; font-family: 'JetBrains Mono', monospace; border: 1px solid rgba(16,185,129,.2); }
+    .thought-text { font-size: 11px; color: var(--text-2); line-height: 1.5; }
 
     /* ── Agents grid tab ── */
-    .agents-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:12px; padding:16px; overflow-y:auto; }
-    .agent-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:14px; box-shadow:var(--shadow); }
-    .agent-card-header { display:flex; align-items:center; gap:10px; margin-bottom:10px; }
-    .agent-card-avatar { width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; color:white; }
-    .agent-card-name { font-weight:700; font-size:13px; }
-    .agent-card-spec { font-size:11px; color:var(--text-3); margin-top:1px; }
-    .agent-stats-row { display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-bottom:10px; }
-    .stat-box { background:var(--bg); border-radius:var(--radius-sm); padding:6px 8px; text-align:center; }
-    .stat-box-val { font-size:16px; font-weight:700; }
-    .stat-box-lbl { font-size:9.5px; color:var(--text-3); text-transform:uppercase; letter-spacing:.4px; }
-    .token-bar-wrap { margin-bottom:8px; }
-    .token-bar-label { display:flex; justify-content:space-between; font-size:10.5px; color:var(--text-3); margin-bottom:3px; }
-    .token-bar-track { height:4px; background:var(--border); border-radius:2px; overflow:hidden; }
-    .token-bar-fill { height:100%; background:linear-gradient(90deg,var(--accent),var(--pink)); border-radius:2px; transition:width .5s; }
-    .latest-thought-box { background:var(--accent-soft); border-radius:var(--radius-sm); padding:8px; font-size:11px; color:#4338ca; line-height:1.4; border:1px solid #c7d2fe; }
-    .synced-tag { display:inline-flex; align-items:center; gap:4px; font-size:10px; padding:2px 7px; border-radius:10px; background:var(--green-soft); color:var(--green); font-weight:600; }
-
-    /* ── Credit tiers ── */
-    .tier-badge { display:inline-flex; align-items:center; gap:3px; font-size:10px; padding:2px 7px; border-radius:10px; font-weight:600; }
-    .tier-normal      { background:var(--green-soft); color:var(--green); }
-    .tier-low_compute { background:var(--amber-soft); color:var(--amber); }
-    .tier-critical    { background:#fee2e2; color:#dc2626; }
-    .tier-dead        { background:#f3f4f6; color:#9ca3af; }
-    .credit-bar-wrap { margin-bottom:8px; }
-    .credit-bar-row { display:flex; justify-content:space-between; align-items:center; font-size:10.5px; color:var(--text-3); margin-bottom:3px; }
-    .credit-bar-track { height:3px; background:var(--border); border-radius:2px; overflow:hidden; }
-    .credit-bar-fill { height:100%; border-radius:2px; transition:width .5s; }
-    .selfmod-tag { font-size:10px; color:var(--text-3); display:flex; align-items:center; gap:3px; margin-top:3px; }
+    .agents-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(250px,1fr)); gap: 10px; padding: 14px; overflow-y: auto; }
+    .agent-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 14px; cursor: pointer; transition: border-color .2s, box-shadow .2s;
+    }
+    .agent-card:hover { border-color: rgba(99,102,241,.35); box-shadow: 0 0 20px rgba(99,102,241,.08); }
+    .agent-card-head { display: flex; align-items: center; gap: 9px; margin-bottom: 10px; }
+    .agent-card-av { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; color: white; }
+    .agent-card-name { font-weight: 700; font-size: 13px; }
+    .agent-card-spec { font-size: 10.5px; color: var(--text-3); margin-top: 1px; }
+    .stats-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; margin-bottom: 10px; }
+    .stat-box { background: var(--surface-2); border-radius: var(--radius-sm); padding: 6px 8px; text-align: center; border: 1px solid var(--border); }
+    .stat-box-val { font-size: 15px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+    .stat-box-lbl { font-size: 9px; color: var(--text-3); text-transform: uppercase; letter-spacing: .4px; margin-top: 1px; }
+    .bar-wrap { margin-bottom: 8px; }
+    .bar-label { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-3); margin-bottom: 3px; font-family: 'JetBrains Mono', monospace; }
+    .bar-track { height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 2px; transition: width .5s; }
+    .token-fill { background: linear-gradient(90deg, var(--accent), var(--pink)); }
+    .credit-fill-normal    { background: var(--green); }
+    .credit-fill-low_compute { background: var(--amber); }
+    .credit-fill-critical  { background: var(--red); }
+    .credit-fill-dead      { background: var(--text-3); }
+    .latest-box {
+      background: var(--accent-dim); border-radius: var(--radius-sm); padding: 7px 9px;
+      font-size: 11px; color: #a5b4fc; line-height: 1.4; border: 1px solid rgba(99,102,241,.18);
+    }
+    .synced-badge { display: inline-flex; align-items: center; gap: 3px; font-size: 9.5px; padding: 1px 6px; border-radius: 8px; background: var(--green-dim); color: var(--green); font-weight: 600; border: 1px solid rgba(16,185,129,.2); }
 
     /* ── Pheromones tab ── */
-    .pheromone-row { display:flex; align-items:flex-start; gap:10px; padding:10px; border-radius:var(--radius-sm); border:1px solid var(--border); margin-bottom:6px; background:var(--surface); }
-    .pheromone-type-dot { width:8px; height:8px; border-radius:50%; margin-top:4px; flex-shrink:0; }
-    .pheromone-content { font-size:12px; color:var(--text-2); line-height:1.4; flex:1; }
-    .pheromone-meta { font-size:10.5px; color:var(--text-3); margin-top:3px; }
-    .pheromone-strength { font-size:10.5px; font-weight:600; padding:2px 7px; border-radius:10px; background:var(--bg); border:1px solid var(--border); color:var(--text-2); white-space:nowrap; }
-    .human-pheromone { background:var(--accent-soft); border-color:#c7d2fe; }
+    .scroll-panel { flex: 1; overflow-y: auto; padding: 14px; }
+    .pheromone-row {
+      display: flex; align-items: flex-start; gap: 10px; padding: 9px 10px;
+      border-radius: var(--radius-sm); border: 1px solid var(--border);
+      background: var(--surface); margin-bottom: 5px; transition: border-color .2s;
+    }
+    .pheromone-row:hover { border-color: var(--border-soft); }
+    .pheromone-row.human { background: var(--accent-dim); border-color: rgba(99,102,241,.2); }
+    .p-dot { width: 7px; height: 7px; border-radius: 50%; margin-top: 4px; flex-shrink: 0; }
+    .p-content { font-size: 11.5px; color: var(--text-2); line-height: 1.4; flex: 1; }
+    .p-meta { font-size: 10px; color: var(--text-3); margin-top: 2px; }
+    .p-strength { font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text-2); white-space: nowrap; font-family: 'JetBrains Mono', monospace; }
 
     /* ── Report tab ── */
-    .report-layout { display:grid; grid-template-columns:1fr 320px; height:100%; overflow:hidden; }
-    .report-main { overflow-y:auto; padding:20px; }
-    .report-aside { border-left:1px solid var(--border); overflow-y:auto; padding:16px; background:var(--surface); }
-    .report-section { margin-bottom:24px; }
-    .report-section-header { display:flex; align-items:center; gap:8px; margin-bottom:12px; padding-bottom:8px; border-bottom:2px solid var(--border); }
-    .report-section-title { font-size:15px; font-weight:700; }
-    .report-section-count { font-size:11px; padding:2px 8px; border-radius:10px; background:var(--bg); border:1px solid var(--border); color:var(--text-2); font-weight:600; }
-    .insight-card { background:var(--surface); border:1px solid var(--border); border-radius:var(--radius); padding:14px; margin-bottom:8px; box-shadow:var(--shadow); transition:box-shadow .2s; }
-    .insight-card:hover { box-shadow:var(--shadow-md); }
-    .insight-header { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
-    .insight-agent-tag { font-size:11px; font-weight:600; padding:2px 8px; border-radius:10px; color:white; }
-    .insight-trigger { font-size:10.5px; color:var(--text-3); background:var(--bg); padding:2px 7px; border-radius:10px; border:1px solid var(--border); }
-    .insight-confidence { margin-left:auto; font-size:11px; font-weight:600; color:var(--green); }
-    .insight-conclusion { font-size:13px; font-weight:500; color:var(--text); margin-bottom:6px; line-height:1.5; }
-    .insight-reasoning { font-size:12px; color:var(--text-2); line-height:1.6; margin-bottom:8px; }
-    .insight-actions { display:flex; flex-wrap:wrap; gap:4px; }
-    .action-tag { font-size:10.5px; padding:2px 8px; border-radius:10px; background:var(--accent-soft); color:var(--accent); border:1px solid #c7d2fe; }
-    .repo-item { display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:var(--radius-sm); border:1px solid var(--border); background:var(--surface); margin-bottom:6px; }
-    .repo-icon { width:28px; height:28px; border-radius:var(--radius-sm); background:var(--bg); display:flex; align-items:center; justify-content:center; font-size:14px; flex-shrink:0; }
-    .repo-name { font-size:12.5px; font-weight:600; }
-    .studied-by-tags { display:flex; flex-wrap:wrap; gap:3px; margin-top:3px; }
-    .studied-by-tag { font-size:9.5px; padding:1px 6px; border-radius:8px; background:var(--bg); border:1px solid var(--border); color:var(--text-2); }
-    .memory-card { background:linear-gradient(135deg,#f5f3ff,#fdf2f8); border:1px solid #e9d5ff; border-radius:var(--radius); padding:12px 14px; margin-bottom:8px; }
-    .memory-topic { font-size:13px; font-weight:700; color:#7c3aed; margin-bottom:6px; }
-    .memory-synthesis { font-size:12px; color:#6d28d9; line-height:1.5; }
-    .memory-meta { font-size:10.5px; color:#a78bfa; margin-top:6px; }
+    .report-layout { display: grid; grid-template-columns: 1fr 300px; height: 100%; overflow: hidden; }
+    .report-main { overflow-y: auto; padding: 18px; }
+    .report-aside { border-left: 1px solid var(--border); overflow-y: auto; padding: 14px; background: var(--surface); }
+    .report-section { margin-bottom: 20px; }
+    .report-section-head { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+    .report-section-title { font-size: 14px; font-weight: 700; }
+    .report-count { font-size: 10.5px; padding: 1px 8px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text-2); font-weight: 600; font-family: 'JetBrains Mono', monospace; }
+    .insight-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 13px; margin-bottom: 7px; transition: border-color .2s, box-shadow .2s;
+    }
+    .insight-card:hover { border-color: rgba(99,102,241,.3); box-shadow: 0 0 18px rgba(99,102,241,.07); }
+    .insight-head { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; }
+    .insight-tag { font-size: 10.5px; font-weight: 600; padding: 1px 8px; border-radius: 8px; color: white; }
+    .insight-trigger { font-size: 10px; color: var(--text-3); background: var(--surface-2); padding: 1px 7px; border-radius: 8px; border: 1px solid var(--border); }
+    .insight-conf { margin-left: auto; font-size: 10.5px; font-weight: 600; color: var(--green); font-family: 'JetBrains Mono', monospace; }
+    .insight-conclusion { font-size: 12.5px; font-weight: 500; color: var(--text); margin-bottom: 5px; line-height: 1.55; }
+    .insight-reasoning { font-size: 11.5px; color: var(--text-2); line-height: 1.6; margin-bottom: 7px; }
+    .insight-actions { display: flex; flex-wrap: wrap; gap: 3px; }
+    .action-tag { font-size: 10px; padding: 1px 7px; border-radius: 8px; background: var(--accent-dim); color: var(--accent); border: 1px solid rgba(99,102,241,.2); }
+    .repo-item { display: flex; align-items: center; gap: 9px; padding: 7px 9px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--surface); margin-bottom: 5px; }
+    .repo-icon { width: 26px; height: 26px; border-radius: var(--radius-sm); background: var(--surface-2); display: flex; align-items: center; justify-content: center; font-size: 11px; flex-shrink: 0; color: var(--text-2); }
+    .repo-name { font-size: 12px; font-weight: 600; }
+    .studied-tags { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 2px; }
+    .studied-tag { font-size: 9.5px; padding: 0 5px; border-radius: 6px; background: var(--surface-2); border: 1px solid var(--border); color: var(--text-3); }
+    .memory-card { background: linear-gradient(135deg, rgba(99,102,241,.06), rgba(236,72,153,.06)); border: 1px solid rgba(99,102,241,.15); border-radius: var(--radius); padding: 11px 13px; margin-bottom: 7px; }
+    .memory-topic { font-size: 12.5px; font-weight: 700; color: #a5b4fc; margin-bottom: 5px; }
+    .memory-synthesis { font-size: 11px; color: #7c83b0; line-height: 1.5; }
+    .memory-meta { font-size: 10px; color: #4a5180; margin-top: 5px; font-family: 'JetBrains Mono', monospace; }
 
     /* ── Collective tab ── */
-    .scroll-panel { flex:1; overflow-y:auto; padding:20px; max-width:860px; margin:0 auto; width:100%; }
-
     .collective-card {
-      background:var(--surface); border:1px solid var(--border); border-radius:12px;
-      padding:20px 24px; margin-bottom:16px; box-shadow:var(--shadow-md);
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 18px 20px; margin-bottom: 12px;
+      transition: border-color .2s, box-shadow .2s;
     }
-    .collective-header { margin-bottom:14px; padding-bottom:12px; border-bottom:1px solid var(--border-soft); }
-    .collective-title { font-size:15px; font-weight:700; color:var(--text); margin-bottom:4px; }
-    .collective-meta { font-size:11px; color:var(--text-3); display:flex; gap:12px; flex-wrap:wrap; }
-    .collective-meta-item { display:flex; align-items:center; gap:4px; }
+    .collective-card:hover { border-color: rgba(99,102,241,.2); box-shadow: 0 4px 24px rgba(0,0,0,.3); }
+    .collective-title { font-size: 14px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
+    .collective-meta { font-size: 10.5px; color: var(--text-3); display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; font-family: 'JetBrains Mono', monospace; }
 
-    .report-block { margin-bottom:16px; }
-    .report-block:last-child { margin-bottom:0; }
+    .report-block { margin-bottom: 14px; }
     .report-label {
-      font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.9px;
-      margin-bottom:6px; display:flex; align-items:center; gap:6px;
+      font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px;
+      margin-bottom: 5px; color: var(--text-3);
     }
-    .report-label.overview  { color:#6366f1; }
-    .report-label.findings  { color:#0ea5e9; }
-    .report-label.opinions  { color:#8b5cf6; }
-    .report-label.improve   { color:#f59e0b; }
-    .report-label.verdict   { color:#10b981; }
+    .report-label.overview  { color: #818cf8; }
+    .report-label.findings  { color: #38bdf8; }
+    .report-label.opinions  { color: #c084fc; }
+    .report-label.improve   { color: var(--amber); }
+    .report-label.verdict   { color: var(--green); }
 
     .report-prose {
-      font-size:13px; color:var(--text); line-height:1.7;
-      padding:10px 14px; border-radius:var(--radius-sm); background:var(--bg);
-      border-left:3px solid;
+      font-size: 12.5px; color: var(--text-2); line-height: 1.7;
+      padding: 10px 12px; border-radius: var(--radius-sm);
+      background: var(--surface-2); border-left: 3px solid;
     }
-    .report-prose.overview  { border-left-color:#6366f1; }
-    .report-prose.opinions  { border-left-color:#8b5cf6; font-style:italic; }
-    .report-prose.verdict   { border-left-color:#10b981; font-weight:500; }
+    .report-prose.overview { border-left-color: #818cf8; }
+    .report-prose.opinions { border-left-color: #c084fc; font-style: italic; color: #b4a9d4; }
+    .report-prose.verdict  { border-left-color: var(--green); font-weight: 500; }
 
-    .report-list { list-style:none; padding:0; margin:0; display:flex; flex-direction:column; gap:5px; }
+    .report-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
     .report-list li {
-      font-size:12.5px; color:var(--text-2); line-height:1.6;
-      padding:7px 10px 7px 12px; border-radius:var(--radius-sm);
-      position:relative;
+      font-size: 12px; color: var(--text-2); line-height: 1.6;
+      padding: 6px 10px 6px 11px; border-radius: var(--radius-sm);
+      position: relative; background: var(--surface-2);
     }
-    .report-list li::before { content:''; position:absolute; left:0; top:50%; transform:translateY(-50%); width:3px; height:60%; border-radius:2px; }
-    .report-list.findings li { background:#f0f9ff; }
-    .report-list.findings li::before { background:#0ea5e9; }
-    .report-list.improve  li { background:#fffbeb; }
-    .report-list.improve  li::before { background:#f59e0b; }
+    .report-list li::before { content: ''; position: absolute; left: 0; top: 50%; transform: translateY(-50%); width: 3px; height: 55%; border-radius: 2px; }
+    .report-list.findings li::before { background: #38bdf8; }
+    .report-list.improve  li::before { background: var(--amber); }
 
-    .collective-fallback { font-size:12px; color:var(--text-2); line-height:1.6; white-space:pre-wrap; background:var(--bg); padding:10px 12px; border-radius:var(--radius-sm); }
-    .collective-generating { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text-3); padding:10px; }
-    .generating-dot { width:6px; height:6px; border-radius:50%; background:var(--accent); animation:pulse 1.2s infinite; }
+    .collective-fallback { font-size: 11.5px; color: var(--text-2); line-height: 1.6; white-space: pre-wrap; background: var(--surface-2); padding: 10px 12px; border-radius: var(--radius-sm); }
+    .collective-pending { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--text-3); padding: 8px 0; }
+    .pending-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: pulseDot 1.2s infinite; }
+    @keyframes pulseDot { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.4;transform:scale(.7)} }
 
-    .empty-state { text-align:center; padding:32px 16px; color:var(--text-3); font-size:12.5px; }
-    .empty-state-icon { font-size:28px; margin-bottom:8px; }
+    /* ── Credits tab ── */
+    .credit-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 14px; transition: border-color .2s, box-shadow .2s;
+    }
+    .credit-card:hover { border-color: rgba(99,102,241,.25); box-shadow: 0 0 20px rgba(99,102,241,.06); }
+    .tier-pill { display: inline-flex; align-items: center; gap: 3px; font-size: 9.5px; padding: 1px 7px; border-radius: 8px; font-weight: 600; border: 1px solid; }
+    .tier-normal      { color: var(--green); border-color: rgba(16,185,129,.3); background: var(--green-dim); }
+    .tier-low_compute { color: var(--amber); border-color: rgba(245,158,11,.3); background: var(--amber-dim); }
+    .tier-critical    { color: var(--red);   border-color: rgba(239,68,68,.3);  background: var(--red-dim); }
+    .tier-dead        { color: var(--text-3); border-color: var(--border); background: var(--surface-2); }
 
-    ::-webkit-scrollbar { width:5px; height:5px; }
-    ::-webkit-scrollbar-track { background:transparent; }
-    ::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
-    ::-webkit-scrollbar-thumb:hover { background:var(--text-3); }
+    .credit-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 5px; margin: 10px 0; }
+    .credit-stat { background: var(--surface-2); border-radius: var(--radius-sm); padding: 7px; text-align: center; border: 1px solid var(--border); }
+    .credit-stat-val { font-size: 17px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+    .credit-stat-lbl { font-size: 9px; color: var(--text-3); text-transform: uppercase; margin-top: 1px; }
+
+    .tier-table { display: grid; grid-template-columns: repeat(4, 1fr); gap: 7px; margin-top: 16px; }
+    .tier-row { background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 9px 11px; }
+    .tier-row-name { font-weight: 700; font-size: 11.5px; margin-bottom: 3px; }
+    .tier-row-desc { font-size: 10.5px; color: var(--text-3); }
+
+    .earn-table { display: grid; grid-template-columns: repeat(auto-fill,minmax(190px,1fr)); gap: 5px; margin-top: 12px; }
+    .earn-row { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 7px 11px; display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; }
+    .earn-amt { font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+
+    /* ── Empty states ── */
+    .empty { text-align: center; padding: 40px 16px; color: var(--text-3); font-size: 12px; }
+    .empty-icon { font-size: 22px; margin-bottom: 8px; opacity: .4; }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 4px; height: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-3); }
+
+    /* ── Transitions ── */
+    .num-transition { transition: all .4s ease; }
+
+    /* ── SimCity / Minecraft colour overrides ── */
+    .header {
+      background: #1e3898;
+      border-bottom: 2px solid #0e2264;
+    }
+    .brand { color: #fff; }
+    .brand-mark { background: linear-gradient(135deg,#4a78e0,#1e3898); box-shadow: 0 0 10px rgba(74,120,224,.4); }
+    .header .stat-chip {
+      background: rgba(255,255,255,0.1);
+      border-color: rgba(255,255,255,0.18);
+      color: rgba(255,255,255,.7);
+    }
+    .header .stat-chip .v { color: #fff; }
+    .header .stat-chip.active  { border-color: #7ab8ff; color: #7ab8ff; }
+    .header .stat-chip.active .v { color: #7ab8ff; }
+    .header .stat-chip.green .v { color: #5adc7a; }
+    .header .phase-badge { background: linear-gradient(90deg,#5adc7a,#00b8d9); }
+    .inject-input { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.22); color: #fff; }
+    .inject-input::placeholder { color: rgba(255,255,255,.38); }
+    .inject-input:focus { border-color: rgba(255,255,255,.55); box-shadow: 0 0 0 3px rgba(255,255,255,.1); }
+    .inject-ok  { color: #5adc7a; }
+    .inject-btn { background: rgba(255,255,255,.18); color: #fff; border: 1px solid rgba(255,255,255,.25); }
+    .inject-btn:hover { background: rgba(255,255,255,.28); }
+
+    .tabs { background: #98a8b8; border-right: 2px solid #7888a0; }
+    .tab-group-label { color: #2a3858; }
+    .tab-btn { color: #161c28; }
+    .tab-btn:hover { background: rgba(30,56,152,.1); color: #1e3898; }
+    .tab-btn.active { background: #1e3898; color: #fff; border: none; }
+
+    .canvas-wrap { background: #05101e; }
+
+    .live-sidebar { background: #bcc8d4; border-left: 2px solid #8898aa; }
+    .section-label { color: #1e3898; font-weight: 700; border-bottom: 2px solid #1e3898; padding-bottom: 3px; margin-bottom: 8px; }
+
+    .agent-row { background: #ccd6e2; }
+    .agent-row.focused { background: rgba(30,56,152,.12); border-color: rgba(30,56,152,.3); }
+    .agent-row.synced  { background: rgba(10,104,34,.1);  border-color: rgba(10,104,34,.2); }
+    .thought-card { background: #ccd6e2; border-color: #8898aa; }
+    .conf-badge   { background: rgba(10,104,34,.12); color: #0a6822; border-color: rgba(10,104,34,.2); }
+    .synced-badge { background: rgba(10,104,34,.12); color: #0a6822; border-color: rgba(10,104,34,.2); }
+    .pheromone-row { background: #cad4e0; border-color: #8898aa; }
+    .pheromone-row.human { background: rgba(30,56,152,.1); border-color: rgba(30,56,152,.2); }
+    .p-strength { background: #d0dae4; border-color: #8898aa; }
+
+    .agent-card { background: #c8d2de; border-color: #8898aa; }
+    .agent-card:hover { border-color: rgba(30,56,152,.4); box-shadow: 0 0 16px rgba(30,56,152,.1); }
+    .stat-box { background: #d0dae4; border-color: #8898aa; }
+    .latest-box { background: rgba(30,56,152,.1); color: #1e3898; border-color: rgba(30,56,152,.2); }
+    .focus-panel { background: #c4ceda; border: 2px solid #8898aa; }
+    .focus-thought { background: #d0dae4; border-color: #8898aa; }
+    .focus-conf { color: #0a6822; }
+    .focus-tag { background: rgba(30,56,152,.1); color: #1e3898; border-color: rgba(30,56,152,.2); }
+
+    .insight-card { background: #c8d2de; border-color: #8898aa; }
+    .insight-card:hover { border-color: rgba(30,56,152,.35); }
+    .insight-trigger { background: #d0dae4; border-color: #8898aa; }
+    .insight-conf { color: #0a6822; }
+    .action-tag { background: rgba(30,56,152,.1); color: #1e3898; border-color: rgba(30,56,152,.2); }
+    .report-count { background: #d0dae4; border-color: #8898aa; }
+    .memory-card { background: linear-gradient(135deg, rgba(30,56,152,.08), rgba(136,16,80,.06)); border-color: rgba(30,56,152,.2); }
+    .memory-topic { color: #1e3898; }
+    .memory-synthesis { color: #344060; }
+    .memory-meta { color: #6070a0; }
+    .report-prose { background: #d0dae4; }
+    .report-prose.opinions { color: #344060; font-style: italic; }
+    .report-list li { background: #d0dae4; color: var(--text-2); }
+    .report-label.overview { color: #1e3898; }
+    .report-label.findings { color: #0d6090; }
+    .report-label.opinions { color: #5a2888; }
+    .collective-card { background: #c8d2de; border-color: #8898aa; }
+    .collective-card:hover { border-color: rgba(30,56,152,.3); }
+    .collective-title { color: var(--text); }
+    .credit-card { background: #c8d2de; border-color: #8898aa; }
+    .credit-card:hover { border-color: rgba(30,56,152,.3); }
+    .credit-stat { background: #d0dae4; border-color: #8898aa; }
+    .tier-row { background: #d0dae4; border-color: #8898aa; }
+    .earn-row { background: #c8d2de; border-color: #8898aa; }
+    .density-row { color: #6070a0; }
+    .density-track { background: #8898aa; }
+    .report-aside { background: #bcc8d4; border-left-color: #8898aa; }
+    .report-aside .section-label { color: #1e3898; border-bottom-color: #1e3898; }
+    .repo-item { background: #c8d2de; border-color: #8898aa; }
+    .repo-icon { background: #d0dae4; color: #6070a0; }
+    .studied-tag { background: #d0dae4; border-color: #8898aa; color: var(--text-3); }
+    .bar-track { background: #9aa8b8; }
+    .density-track { background: #9aa8b8; }
+    .focus-bar-track { background: #9aa8b8; }
   </style>
 </head>
 <body>
 <div class="app">
 
-  <!-- Header -->
   <div class="header">
-    <div class="brand"><div class="brand-dot"></div>Swarm Mind</div>
-    <div class="header-pills">
-      <div class="pill">Step <span class="val" id="h-step">0</span></div>
-      <div class="pill accent">Pheromones <span class="val" id="h-pheromones">0</span></div>
-      <div class="pill">Discoveries <span class="val" id="h-discoveries">0</span></div>
-      <div class="pill green">Synced <span class="val" id="h-synced">0/0</span></div>
-      <div class="pill amber">Tokens <span class="val" id="h-tokens">0</span></div>
-      <div class="pill">Density <span class="val" id="h-density">0.000</span></div>
-      <div class="pill" id="h-credits-pill">Credits <span class="val" id="h-credits">—</span></div>
-      <div class="transition-badge" id="h-transition">⚡ Phase Transition</div>
+    <div class="brand">
+      <div class="brand-mark">S</div>
+      <span class="mc" style="font-size:9px;letter-spacing:1px">SWARM MIND</span>
+    </div>
+    <div class="header-stats">
+      <div class="stat-chip">Step <span class="v" id="h-step">0</span></div>
+      <div class="stat-chip active">Pheromones <span class="v" id="h-phero">0</span></div>
+      <div class="stat-chip">Discoveries <span class="v" id="h-disc">0</span></div>
+      <div class="stat-chip green">Synced <span class="v" id="h-synced">0/0</span></div>
+      <div class="stat-chip">Tokens <span class="v" id="h-tokens">0</span></div>
+      <div class="stat-chip">Density <span class="v" id="h-density">0.000</span></div>
+      <div class="stat-chip" id="h-credits-chip">Credits <span class="v" id="h-credits">—</span></div>
+      <div class="phase-badge" id="h-phase">Phase Transition</div>
     </div>
     <div class="inject-wrap">
-      <input class="inject-input" id="inject-input" type="text" placeholder="Inject a topic…" />
+      <input class="inject-input" id="inject-input" type="text" placeholder="Inject a signal..." />
       <button class="inject-btn" onclick="injectTopic()">Inject</button>
-      <span class="inject-feedback" id="inject-feedback">✓ Injected!</span>
+      <span class="inject-ok" id="inject-ok">Injected</span>
     </div>
   </div>
 
   <div class="body">
-    <!-- Sidebar tabs -->
     <div class="tabs">
-      <div class="tab-section-label">Monitor</div>
-      <button class="tab-btn active" onclick="switchTab('live')"><span class="tab-icon">⬤</span> Live View</button>
+      <div class="tab-group-label mc" style="font-size:7px">Monitor</div>
+      <button class="tab-btn active" onclick="switchTab('live')"><span class="tab-icon">◉</span> Live View</button>
       <button class="tab-btn" onclick="switchTab('agents')"><span class="tab-icon">◈</span> Agents</button>
-      <button class="tab-btn" onclick="switchTab('pheromones')"><span class="tab-icon">◎</span> Pheromones</button>
-      <div class="tab-section-label" style="margin-top:8px">Analysis</div>
+      <button class="tab-btn" onclick="switchTab('pheromones')"><span class="tab-icon">◎</span> Signals</button>
+      <div class="tab-group-label mc" style="font-size:7px;margin-top:8px">Analysis</div>
       <button class="tab-btn" onclick="switchTab('report')"><span class="tab-icon">◷</span> Report</button>
       <button class="tab-btn" onclick="switchTab('collective')"><span class="tab-icon">◈</span> Collective</button>
       <button class="tab-btn" onclick="switchTab('credits')"><span class="tab-icon">◉</span> Credits</button>
     </div>
 
-    <!-- Content -->
     <div class="content">
 
       <!-- Live View -->
@@ -375,31 +528,30 @@
         <div class="live-layout">
           <div class="canvas-wrap" id="canvas-wrap">
             <canvas id="canvas"></canvas>
-            <!-- Focus panel (click agent to open) -->
-            <div class="focus-overlay" id="focus-overlay">
-              <button class="focus-close" onclick="closeFocus()">✕</button>
+            <div class="focus-panel" id="focus-panel">
+              <button class="focus-close" onclick="closeFocus()">x</button>
               <div id="focus-content"></div>
             </div>
-            <div class="density-bar-wrap">
-              <div class="density-label-row">
-                <span id="density-label">Density 0.000</span>
-                <span id="density-threshold-label">Threshold 0.60</span>
+            <div class="density-wrap">
+              <div class="density-row">
+                <span id="density-label" class="mono">density 0.000</span>
+                <span id="density-thresh-label" class="mono">threshold 0.35</span>
               </div>
               <div class="density-track">
                 <div class="density-fill" id="density-fill"></div>
-                <div class="density-threshold-marker" id="density-marker"></div>
+                <div class="density-marker" id="density-marker"></div>
               </div>
             </div>
             <div class="flash-overlay" id="flash"></div>
           </div>
-          <div class="sidebar">
+          <div class="live-sidebar">
             <div>
-              <div class="section-title">Agents <span style="color:var(--text-3);font-weight:400;font-size:10px">— click to inspect</span></div>
+              <div class="section-label">Agents</div>
               <div id="agent-list"></div>
             </div>
             <div>
-              <div class="section-title">Live Thoughts</div>
-              <div id="thought-feed"><div class="empty-state"><div class="empty-state-icon">🧠</div>Agents thinking...</div></div>
+              <div class="section-label">Live Feed</div>
+              <div id="thought-feed"><div class="empty"><div class="empty-icon">·</div>Agents initializing...</div></div>
             </div>
           </div>
         </div>
@@ -413,68 +565,57 @@
       <!-- Pheromones tab -->
       <div class="tab-panel" id="panel-pheromones">
         <div class="scroll-panel">
-          <div id="pheromone-list"><div class="empty-state"><div class="empty-state-icon">◎</div>No pheromones yet</div></div>
+          <div id="pheromone-list"><div class="empty"><div class="empty-icon">·</div>No signals yet</div></div>
         </div>
       </div>
 
       <!-- Report tab -->
       <div class="tab-panel" id="panel-report">
         <div class="report-layout">
-          <div class="report-main" id="report-main"><div class="empty-state" style="padding-top:60px"><div class="empty-state-icon">📊</div>Generating report...</div></div>
+          <div class="report-main" id="report-main"><div class="empty" style="padding-top:60px"><div class="empty-icon">·</div>Generating report...</div></div>
           <div class="report-aside">
-            <div class="section-title" style="margin-bottom:12px">Datasets Analyzed</div>
-            <div id="report-repos"><div class="empty-state"><div class="empty-state-icon">🔭</div>None yet</div></div>
-            <div class="section-title" style="margin-top:16px;margin-bottom:12px">Agent Summaries</div>
-            <div id="report-agent-summaries"></div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Credits tab -->
-      <div class="tab-panel" id="panel-credits">
-        <div style="flex:1;overflow-y:auto;padding:20px;">
-          <div style="max-width:860px;margin:0 auto;">
-            <div style="margin-bottom:16px;">
-              <div style="font-size:15px;font-weight:700;margin-bottom:4px">Swarm Mind Credit Economy</div>
-              <div style="font-size:12px;color:var(--text-3)">Agents earn credits for discoveries and spend them on LLM compute. Tier gates model access.</div>
-            </div>
-            <div id="credits-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-bottom:24px"></div>
-            <div style="font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">Tier Reference</div>
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;font-size:12px;">
-              <div style="background:var(--green-soft);border:1px solid #a7f3d0;border-radius:var(--radius-sm);padding:10px 12px;">
-                <div style="font-weight:700;color:var(--green);margin-bottom:3px">Normal ≥50cr</div>
-                <div style="color:#065f46;font-size:11px">Full model, all capabilities</div>
-              </div>
-              <div style="background:var(--amber-soft);border:1px solid #fde68a;border-radius:var(--radius-sm);padding:10px 12px;">
-                <div style="font-weight:700;color:var(--amber);margin-bottom:3px">Low Compute 10–49cr</div>
-                <div style="color:#92400e;font-size:11px">Haiku model, lighter compute</div>
-              </div>
-              <div style="background:#fee2e2;border:1px solid #fca5a5;border-radius:var(--radius-sm);padding:10px 12px;">
-                <div style="font-weight:700;color:#dc2626;margin-bottom:3px">Critical 1–9cr</div>
-                <div style="color:#991b1b;font-size:11px">Passive scan only, no LLM</div>
-              </div>
-              <div style="background:#f3f4f6;border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px 12px;">
-                <div style="font-weight:700;color:#6b7280;margin-bottom:3px">Dead &lt;1cr</div>
-                <div style="color:#9ca3af;font-size:11px">Dormant, emits distress</div>
-              </div>
-            </div>
-            <div style="margin-top:24px;font-size:11px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">Earn Rates</div>
-            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px;font-size:12px">
-              <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;display:flex;justify-content:space-between"><span>High confidence finding</span><span style="font-weight:700;color:var(--green)">+5cr</span></div>
-              <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;display:flex;justify-content:space-between"><span>Medium confidence finding</span><span style="font-weight:700;color:var(--green)">+2cr</span></div>
-              <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;display:flex;justify-content:space-between"><span>Collective contribution</span><span style="font-weight:700;color:var(--green)">+10cr</span></div>
-              <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;display:flex;justify-content:space-between"><span>Self-modification</span><span style="font-weight:700;color:var(--green)">+3cr</span></div>
-              <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 12px;display:flex;justify-content:space-between"><span>LLM token burn</span><span style="font-weight:700;color:#dc2626">-1cr / 1k tokens</span></div>
-            </div>
+            <div class="section-label" style="margin-bottom:10px">Datasets Analyzed</div>
+            <div id="report-repos"><div class="empty"><div class="empty-icon">·</div>None yet</div></div>
+            <div class="section-label" style="margin-top:14px;margin-bottom:10px">Agent Summaries</div>
+            <div id="report-summaries"></div>
           </div>
         </div>
       </div>
 
       <!-- Collective tab -->
       <div class="tab-panel" id="panel-collective">
-        <div style="flex:1;overflow-y:auto;padding:20px;">
-          <div style="max-width:860px;margin:0 auto;" id="collective-list">
-            <div class="empty-state"><div class="empty-state-icon">🌐</div>Waiting for phase transition...</div>
+        <div style="flex:1;overflow-y:auto;padding:18px">
+          <div style="max-width:820px;margin:0 auto" id="collective-list">
+            <div class="empty"><div class="empty-icon">·</div>Waiting for phase transition...</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Credits tab -->
+      <div class="tab-panel" id="panel-credits">
+        <div style="flex:1;overflow-y:auto;padding:18px">
+          <div style="max-width:820px;margin:0 auto">
+            <div style="margin-bottom:18px">
+              <div style="font-size:15px;font-weight:700;margin-bottom:3px">Swarm Mind Credit Economy</div>
+              <div style="font-size:12px;color:var(--text-3)">Agents earn credits for discoveries, spend them on LLM compute. Tier gates model access.</div>
+            </div>
+            <div id="credits-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;margin-bottom:22px"></div>
+
+            <div style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px">Survival Tiers</div>
+            <div class="tier-table">
+              <div class="tier-row"><div class="tier-row-name" style="color:var(--green)">Normal &ge;50cr</div><div class="tier-row-desc">Full model, all capabilities</div></div>
+              <div class="tier-row"><div class="tier-row-name" style="color:var(--amber)">Low Compute 10–49cr</div><div class="tier-row-desc">Haiku model, lighter compute</div></div>
+              <div class="tier-row"><div class="tier-row-name" style="color:var(--red)">Critical 1–9cr</div><div class="tier-row-desc">Passive scan only, no LLM</div></div>
+              <div class="tier-row"><div class="tier-row-name" style="color:var(--text-3)">Dead &lt;1cr</div><div class="tier-row-desc">Dormant, emits distress</div></div>
+            </div>
+
+            <div style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.8px;margin:18px 0 8px">Earn Rates</div>
+            <div class="earn-table">
+              <div class="earn-row"><span>High confidence finding</span><span class="earn-amt" style="color:var(--green)">+5cr</span></div>
+              <div class="earn-row"><span>Medium confidence finding</span><span class="earn-amt" style="color:var(--green)">+2cr</span></div>
+              <div class="earn-row"><span>Collective contribution</span><span class="earn-amt" style="color:var(--green)">+10cr</span></div>
+              <div class="earn-row"><span>LLM token burn</span><span class="earn-amt" style="color:var(--red)">-1cr / 1k tokens</span></div>
+            </div>
           </div>
         </div>
       </div>
@@ -485,449 +626,676 @@
 
 <script>
 const API = window.location.origin;
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
 
-let agents = [], pheromones = [], thoughts = [], decisions = [];
+// ── State ──
+let agents = [], pheromones = [], thoughts = [];
 let prevTransition = false, focusedAgentId = null;
 let agentColors = {};
 const palette = ['#6366f1','#ec4899','#10b981','#f59e0b','#3b82f6','#8b5cf6','#06b6d4','#f43f5e'];
-const pheromoneTypeColors = { knowledge:'#3b82f6', code:'#10b981', pr:'#f59e0b', technique:'#8b5cf6' };
 
-// Chat bubbles: [{agentId, text, createdAt}]
-let chatBubbles = [];
-const BUBBLE_DURATION = 5000; // ms
+// ── Drag state ──
+let draggingAgentId = null;
+let mouseDownPos = null;
+let isDragging = false;
 
-// ── Tab switching ──
-function switchTab(name) {
-  const tabNames = ['live','agents','pheromones','report','collective','credits'];
-  document.querySelectorAll('.tab-btn').forEach((b, i) => b.classList.toggle('active', tabNames[i] === name));
-  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-  document.getElementById('panel-' + name).classList.add('active');
-  if (name === 'live') resize();
-  if (name === 'report') fetchReport();
-}
+// ── Connection particles (travel along edges) ──
+let connParticles = [];
 
-// ── Credit helpers ──
-function tierLabel(tier) {
-  if (tier === 'normal') return '<span class="tier-badge tier-normal">Normal</span>';
-  if (tier === 'low_compute') return '<span class="tier-badge tier-low_compute">Low Compute</span>';
-  if (tier === 'critical') return '<span class="tier-badge tier-critical">Critical</span>';
-  if (tier === 'dead') return '<span class="tier-badge tier-dead">Dead</span>';
-  return '';
-}
-function creditBarColor(tier) {
-  if (tier === 'normal') return 'var(--green)';
-  if (tier === 'low_compute') return 'var(--amber)';
-  if (tier === 'critical') return '#dc2626';
-  return '#9ca3af';
-}
+// ── Smooth positions (lerp toward server position each frame) ──
+const agentSmooth = {}; // id -> {x, y}
 
-// ── Colors ──
-function getColor(agentId) {
-  if (!agentColors[agentId]) agentColors[agentId] = palette[Object.keys(agentColors).length % palette.length];
-  return agentColors[agentId];
+// ── Live feed dedup (prevents blink) ──
+let lastFeedKey = '';
+
+// ── Canvas ──
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+// Trails: agentId -> [{x, y, age}]
+const trails = {};
+// Chat bubbles
+let bubbles = [];
+const BUBBLE_DUR = 5500;
+// Phase burst
+let burst = null;
+// Star field
+let stars = [];
+// Pheromone drift particles
+let driftParticles = [];
+// New pheromone flash rings
+let flashRings = [];
+
+// ── Helpers ──
+function getColor(id) {
+  if (!agentColors[id]) agentColors[id] = palette[Object.keys(agentColors).length % palette.length];
+  return agentColors[id];
 }
-function formatTokens(n) {
-  if (n >= 1000000) return (n/1000000).toFixed(1)+'M';
-  if (n >= 1000) return (n/1000).toFixed(1)+'k';
+function fmtTokens(n) {
+  if (n >= 1e6) return (n/1e6).toFixed(1)+'M';
+  if (n >= 1e3) return (n/1e3).toFixed(1)+'k';
   return String(n);
 }
 function timeSince(ts) {
   const s = Math.floor((Date.now()-ts)/1000);
-  if (s < 60) return s+'s ago';
-  return Math.floor(s/60)+'m ago';
+  if (s < 60) return s+'s';
+  return Math.floor(s/60)+'m';
+}
+function tierColor(tier) {
+  if (tier === 'normal') return 'var(--green)';
+  if (tier === 'low_compute') return 'var(--amber)';
+  if (tier === 'critical') return 'var(--red)';
+  return 'var(--text-3)';
+}
+function tierPill(tier) {
+  return `<span class="tier-pill tier-${tier}">${tier === 'low_compute' ? 'Low Compute' : tier.charAt(0).toUpperCase()+tier.slice(1)}</span>`;
 }
 
-// ── Canvas resize ──
+// ── Tab switching ──
+function switchTab(name) {
+  const names = ['live','agents','pheromones','report','collective','credits'];
+  document.querySelectorAll('.tab-btn').forEach((b,i) => b.classList.toggle('active', names[i] === name));
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById('panel-'+name).classList.add('active');
+  if (name === 'live') resize();
+  if (name === 'report') fetchReport();
+}
+
+// ── Canvas setup ──
 function resize() {
   const area = canvas.parentElement;
-  canvas.width = area.clientWidth * 2;
-  canvas.height = area.clientHeight * 2;
-  canvas.style.width = area.clientWidth + 'px';
-  canvas.style.height = area.clientHeight + 'px';
+  const w = area.clientWidth, h = area.clientHeight;
+  canvas.width = w * 2;
+  canvas.height = h * 2;
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
   ctx.scale(2, 2);
+  initStars(w, h);
 }
+
+function initStars(w, h) {
+  stars = [];
+  for (let i = 0; i < 140; i++) {
+    stars.push({
+      x: Math.random() * w,
+      y: Math.random() * h,
+      r: Math.random() * 0.9 + 0.2,
+      a: Math.random() * 0.4 + 0.1,
+    });
+  }
+}
+
 resize();
 window.addEventListener('resize', () => {
   if (document.getElementById('panel-live').classList.contains('active')) resize();
 });
 
-// ── Canvas coord helpers ──
-function agentToCanvas(a) {
+// ── Agent → canvas coords ──
+function toCanvas(a) {
   const w = canvas.width/2, h = canvas.height/2;
-  return { x: a.position.x * w/1000, y: a.position.y * h/800 };
+  return { x: a.position.x * w / 1000, y: a.position.y * h / 800 };
 }
-function canvasToWorld(cx, cy) {
+// Smooth version — uses interpolated position for rendering
+function toCanvasS(a) {
+  const s = agentSmooth[a.id];
   const w = canvas.width/2, h = canvas.height/2;
-  return { x: cx * 1000/w, y: cy * 800/h };
+  const x = s ? s.x : a.position.x;
+  const y = s ? s.y : a.position.y;
+  return { x: x * w / 1000, y: y * h / 800 };
+}
+function fromCanvas(cx, cy) {
+  const w = canvas.width/2, h = canvas.height/2;
+  return { x: cx * 1000 / w, y: cy * 800 / h };
 }
 
-// ── Canvas click → focus agent ──
-canvas.addEventListener('click', (e) => {
-  const rect = canvas.getBoundingClientRect();
-  const cx = (e.clientX - rect.left);
-  const cy = (e.clientY - rect.top);
-  const world = canvasToWorld(cx, cy);
-
-  let closest = null, closestDist = Infinity;
+// ── Canvas drag + click ──
+canvas.addEventListener('mousedown', e => {
+  if (e.button !== 0) return;
+  const r = canvas.getBoundingClientRect();
+  mouseDownPos = { x: e.clientX, y: e.clientY };
+  isDragging = false;
+  const world = fromCanvas(e.clientX - r.left, e.clientY - r.top);
+  let best = null, bestD = Infinity;
   for (const a of agents) {
     const dx = a.position.x - world.x, dy = a.position.y - world.y;
-    const dist = Math.sqrt(dx*dx + dy*dy);
-    if (dist < closestDist) { closestDist = dist; closest = a; }
+    const d = Math.sqrt(dx*dx + dy*dy);
+    if (d < bestD) { bestD = d; best = a; }
   }
-
-  if (closest && closestDist < 60) {
-    openFocus(closest.id);
-  } else {
-    closeFocus();
+  if (best && bestD < 70) {
+    draggingAgentId = best.id;
+    canvas.style.cursor = 'grabbing';
+    e.preventDefault();
   }
 });
 
-function openFocus(agentId) {
-  focusedAgentId = agentId;
-  const overlay = document.getElementById('focus-overlay');
-  overlay.classList.add('visible');
+canvas.addEventListener('mousemove', e => {
+  const r = canvas.getBoundingClientRect();
+  const world = fromCanvas(e.clientX - r.left, e.clientY - r.top);
+  if (draggingAgentId) {
+    if (mouseDownPos && Math.hypot(e.clientX - mouseDownPos.x, e.clientY - mouseDownPos.y) > 4) {
+      isDragging = true;
+    }
+    if (isDragging) {
+      const agent = agents.find(a => a.id === draggingAgentId);
+      if (agent) {
+        const nx = Math.max(50, Math.min(950, world.x));
+        const ny = Math.max(50, Math.min(750, world.y));
+        agent.position.x = nx; agent.position.y = ny;
+        // snap smooth position too so drag feels instant
+        if (agentSmooth[draggingAgentId]) {
+          agentSmooth[draggingAgentId].x = nx;
+          agentSmooth[draggingAgentId].y = ny;
+        }
+      }
+      canvas.style.cursor = 'grabbing';
+    }
+    return;
+  }
+  // Hover cursor
+  let hover = false;
+  for (const a of agents) {
+    const dx = a.position.x - world.x, dy = a.position.y - world.y;
+    if (Math.sqrt(dx*dx+dy*dy) < 70) { hover = true; break; }
+  }
+  canvas.style.cursor = hover ? 'grab' : 'default';
+});
+
+canvas.addEventListener('mouseup', e => {
+  const wasDrag = isDragging;
+  draggingAgentId = null;
+  isDragging = false;
+  canvas.style.cursor = 'default';
+  if (wasDrag) return; // don't fire click after drag
+  // treat as click
+  const r = canvas.getBoundingClientRect();
+  const world = fromCanvas(e.clientX - r.left, e.clientY - r.top);
+  let best = null, bestD = Infinity;
+  for (const a of agents) {
+    const dx = a.position.x - world.x, dy = a.position.y - world.y;
+    const d = Math.sqrt(dx*dx + dy*dy);
+    if (d < bestD) { bestD = d; best = a; }
+  }
+  if (best && bestD < 70) openFocus(best.id);
+  else closeFocus();
+});
+
+canvas.addEventListener('mouseleave', () => {
+  draggingAgentId = null;
+  isDragging = false;
+  canvas.style.cursor = 'default';
+});
+
+function openFocus(id) {
+  focusedAgentId = id;
+  document.getElementById('focus-panel').classList.add('open');
   renderFocusPanel();
 }
-
 function closeFocus() {
   focusedAgentId = null;
-  document.getElementById('focus-overlay').classList.remove('visible');
+  document.getElementById('focus-panel').classList.remove('open');
 }
-
 function renderFocusPanel() {
   if (!focusedAgentId) return;
   const a = agents.find(ag => ag.id === focusedAgentId);
   if (!a) return;
   const color = getColor(a.id);
-  const initials = (a.name||'').slice(0,2);
   const tokenPct = Math.min((a.tokensUsed||0)/(a.tokenBudget||1)*100,100).toFixed(0);
+  const cr = a.credits || { balance: 100, earned: 0, spent: 0, tier: 'normal' };
 
-  // Fetch full agent data for thoughts + repos
   fetch(API+'/api/agent/'+a.id).then(r=>r.json()).then(full => {
-    const thoughts = (full.recentThoughts||[]).filter(t=>t.conclusion).slice(0,5);
-    const repos = (full.reposStudied||[]).slice(0,8);
-
+    const topThoughts = (full.recentThoughts||[]).filter(t=>t.conclusion).slice(0,4);
+    const repos = (full.reposStudied||[]).slice(0,6);
     document.getElementById('focus-content').innerHTML = `
-      <div class="focus-agent-header">
-        <div class="focus-avatar" style="background:${color}">${initials}</div>
+      <div class="focus-head">
+        <div class="focus-av" style="background:${color}">${(a.name||'').slice(0,2)}</div>
         <div>
           <div class="focus-name">${a.name}</div>
-          <div class="focus-spec">${a.specialization||''} ${a.synchronized?'<span class="synced-tag">✓ Synced</span>':''}</div>
+          <div class="focus-sub">${a.specialization||''} ${a.synchronized?'<span class="synced-badge">Synced</span>':''}</div>
         </div>
       </div>
-      <div class="focus-stat-row">
+      <div class="focus-stats">
         <div class="focus-stat"><div class="focus-stat-val">${a.discoveries||0}</div><div class="focus-stat-lbl">Found</div></div>
         <div class="focus-stat"><div class="focus-stat-val">${a.thoughtCount||0}</div><div class="focus-stat-lbl">Thoughts</div></div>
-        <div class="focus-stat"><div class="focus-stat-val">${formatTokens(a.tokensUsed||0)}</div><div class="focus-stat-lbl">Tokens</div></div>
+        <div class="focus-stat"><div class="focus-stat-val">${fmtTokens(a.tokensUsed||0)}</div><div class="focus-stat-lbl">Tokens</div></div>
       </div>
-      <div class="credit-bar-wrap" style="margin-bottom:8px">
-        <div class="credit-bar-row">
-          <span>Credits ${tierLabel((a.credits||{}).tier||'normal')}</span>
-          <span style="font-weight:600;color:${creditBarColor((a.credits||{}).tier||'normal')}">${((a.credits||{}).balance||100).toFixed(1)}cr</span>
-        </div>
-        <div class="credit-bar-track"><div class="credit-bar-fill" style="width:${Math.min(((a.credits||{}).balance||100)/200*100,100).toFixed(0)}%;background:${creditBarColor((a.credits||{}).tier||'normal')}"></div></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:10px;color:var(--text-3);margin-bottom:4px">
+        <span>${tierPill(cr.tier)}</span>
+        <span class="mono" style="color:${tierColor(cr.tier)};font-weight:600">${cr.balance.toFixed(1)}cr</span>
       </div>
-      <div class="token-bar-wrap" style="margin-bottom:10px">
-        <div class="token-bar-track"><div class="token-bar-fill" style="width:${tokenPct}%"></div></div>
+      <div class="bar-track" style="margin-bottom:10px">
+        <div style="height:3px;border-radius:2px;transition:width .5s;background:${tierColor(cr.tier)};width:${Math.min(cr.balance/200*100,100).toFixed(0)}%"></div>
       </div>
-      ${repos.length > 0 ? `
-        <div class="focus-section">
-          <div class="focus-section-title">Datasets Analyzed</div>
-          ${repos.map(r=>`<span class="focus-repo-tag">🔭 ${r.replace(/:/g,' · ')}</span>`).join('')}
-        </div>` : ''}
-      ${thoughts.length > 0 ? `
-        <div class="focus-section">
-          <div class="focus-section-title">Top Thoughts</div>
-          ${thoughts.map(t=>`
-            <div class="focus-thought">
-              <span class="focus-thought-conf">${Math.round((t.confidence||0)*100)}%</span>
-              ${(t.conclusion||'').slice(0,160)}
-            </div>`).join('')}
-        </div>` : ''}
-      <div style="font-size:10.5px;color:var(--text-3);margin-top:4px;font-style:italic">${a.currentAction||'idle'}</div>
+      <div class="focus-bar-track"><div class="focus-bar-fill" style="width:${tokenPct}%"></div></div>
+      ${repos.length?`<div class="focus-section-title" style="margin-bottom:5px">Datasets</div>
+        ${repos.map(r=>`<span class="focus-tag">${r.replace(/:/g,' · ')}</span>`).join('')}<br style="margin-bottom:8px">`:''}
+      ${topThoughts.length?`<div class="focus-section-title" style="margin:8px 0 5px">Top Thoughts</div>
+        ${topThoughts.map(t=>`<div class="focus-thought">
+          <span class="focus-conf">${Math.round((t.confidence||0)*100)}%</span>
+          ${(t.conclusion||'').slice(0,150)}
+        </div>`).join('')}`:''}
+      <div class="focus-action">${a.currentAction||'idle'}</div>
     `;
-  }).catch(() => {
-    document.getElementById('focus-content').innerHTML = `<div class="focus-agent-header">
-      <div class="focus-avatar" style="background:${color}">${initials}</div>
-      <div><div class="focus-name">${a.name}</div><div class="focus-spec">${a.specialization||''}</div></div>
+  }).catch(()=>{
+    document.getElementById('focus-content').innerHTML = `<div class="focus-head">
+      <div class="focus-av" style="background:${color}">${(a.name||'').slice(0,2)}</div>
+      <div><div class="focus-name">${a.name}</div></div>
     </div>`;
   });
 }
 
-// ── Chat bubbles ──
-function addBubble(agentId, text) {
-  chatBubbles.push({ agentId, text: text.slice(0,90), createdAt: Date.now() });
-  if (chatBubbles.length > 8) chatBubbles.shift();
+// ── Trails ──
+function addTrail(id, x, y) {
+  if (!trails[id]) trails[id] = [];
+  trails[id].push({ x, y, age: 0 });
+  if (trails[id].length > 28) trails[id].shift();
 }
-
-function drawBubbles() {
-  const now = Date.now();
-  chatBubbles = chatBubbles.filter(b => now - b.createdAt < BUBBLE_DURATION);
-
-  for (const bubble of chatBubbles) {
-    const a = agents.find(ag => ag.id === bubble.agentId);
-    if (!a) continue;
-
-    const pos = agentToCanvas(a);
-    const age = now - bubble.createdAt;
-    const alpha = age < 500 ? age/500 : age > 4000 ? 1 - (age-4000)/1000 : 1;
-    const color = getColor(bubble.agentId);
-
-    const maxW = 160, pad = 8, lineH = 14;
-    ctx.font = '10px -apple-system,sans-serif';
-
-    // Word wrap
-    const words = bubble.text.split(' ');
-    const lines = [];
-    let line = '';
-    for (const w of words) {
-      const test = line ? line+' '+w : w;
-      if (ctx.measureText(test).width > maxW - pad*2) { if (line) lines.push(line); line = w; }
-      else line = test;
-    }
-    if (line) lines.push(line);
-
-    const bw = maxW, bh = lines.length * lineH + pad*2 + 6;
-    let bx = pos.x + 14, by = pos.y - bh - 10;
-
-    const cw = canvas.width/2, ch = canvas.height/2;
-    if (bx + bw > cw - 10) bx = pos.x - bw - 14;
-    if (by < 10) by = pos.y + 16;
-
-    ctx.globalAlpha = alpha;
-
-    // Shadow
-    ctx.fillStyle = 'rgba(0,0,0,0.06)';
-    ctx.beginPath();
-    ctx.roundRect(bx+2, by+2, bw, bh, 8);
-    ctx.fill();
-
-    // Background
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.roundRect(bx, by, bw, bh, 8);
-    ctx.fill();
-
-    // Accent bar
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.roundRect(bx, by, 3, bh, [8,0,0,8]);
-    ctx.fill();
-
-    // Text
-    ctx.fillStyle = '#374151';
-    lines.forEach((l, i) => ctx.fillText(l, bx+pad+4, by+pad+i*lineH+10));
-
-    // Tail
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.moveTo(pos.x+10, pos.y-8);
-    ctx.lineTo(pos.x+4, pos.y-2);
-    ctx.lineTo(pos.x+16, pos.y-2);
-    ctx.closePath();
-    ctx.fill();
-
-    ctx.globalAlpha = 1;
+function ageTrails() {
+  for (const id in trails) {
+    for (const p of trails[id]) p.age++;
+    trails[id] = trails[id].filter(p => p.age < 28);
   }
 }
 
-// ── Draw canvas ──
-function drawSwarm(transitioned) {
+// ── Chat bubbles ──
+let prevThoughtIds = new Set();
+function addBubble(agentId, text) {
+  bubbles.push({ agentId, text: text.slice(0,80), born: Date.now() });
+  if (bubbles.length > 6) bubbles.shift();
+}
+
+// ── Drift particles ──
+function addDrift(x, y, color) {
+  for (let i = 0; i < 4; i++) {
+    driftParticles.push({
+      x, y,
+      vx: (Math.random()-.5) * 1.2,
+      vy: (Math.random()-.5) * 1.2 - 0.4,
+      life: 1.0,
+      color,
+      r: Math.random() * 2.5 + 1,
+    });
+  }
+}
+
+// ── Phase burst ──
+function triggerBurst() {
   const w = canvas.width/2, h = canvas.height/2;
-  ctx.fillStyle = transitioned ? 'rgba(248,249,251,0.12)' : 'rgba(248,249,251,0.22)';
+  burst = { x: w/2, y: h/2, r: 0, maxR: Math.max(w,h)*0.9 };
+}
+
+// ── Draw ──
+let lastPheromoneCount = 0;
+let animRunning = false;
+
+function drawFrame(transitioned) {
+  const w = canvas.width/2, h = canvas.height/2;
+
+  // ── Smooth position lerp (runs every frame @ 60fps) ──
+  const LERP = 0.07;
+  for (const a of agents) {
+    if (!agentSmooth[a.id]) {
+      agentSmooth[a.id] = { x: a.position.x, y: a.position.y };
+    } else if (a.id !== draggingAgentId) {
+      agentSmooth[a.id].x += (a.position.x - agentSmooth[a.id].x) * LERP;
+      agentSmooth[a.id].y += (a.position.y - agentSmooth[a.id].y) * LERP;
+    }
+  }
+
+  // Background fade (dark navy — keeps glow effects crisp)
+  ctx.fillStyle = transitioned ? 'rgba(5,16,30,0.22)' : 'rgba(5,16,30,0.34)';
   ctx.fillRect(0, 0, w, h);
+
+  // Stars
+  for (const s of stars) {
+    ctx.globalAlpha = s.a;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // Phase burst ring
+  if (burst) {
+    burst.r += 5;
+    const alpha = 1 - burst.r / burst.maxR;
+    if (alpha > 0) {
+      ctx.strokeStyle = `rgba(99,102,241,${(alpha * 0.6).toFixed(2)})`;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(burst.x, burst.y, burst.r, 0, Math.PI*2); ctx.stroke();
+      // second ring slightly behind
+      const r2 = burst.r * 0.82;
+      ctx.strokeStyle = `rgba(236,72,153,${(alpha * 0.35).toFixed(2)})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(burst.x, burst.y, r2, 0, Math.PI*2); ctx.stroke();
+    } else burst = null;
+  }
+
+  // Flash rings from new pheromones
+  flashRings = flashRings.filter(ring => ring.life > 0);
+  for (const ring of flashRings) {
+    ring.r += 2.5;
+    ring.life -= 0.04;
+    ctx.strokeStyle = ring.color + Math.round(ring.life * 80).toString(16).padStart(2,'0');
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(ring.x, ring.y, ring.r, 0, Math.PI*2); ctx.stroke();
+  }
+
+  // Drift particles
+  driftParticles = driftParticles.filter(p => p.life > 0);
+  for (const p of driftParticles) {
+    p.x += p.vx; p.y += p.vy;
+    p.life -= 0.025;
+    ctx.globalAlpha = p.life * 0.7;
+    ctx.fillStyle = p.color;
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.r * p.life, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // ── Agent connection lines (always drawn between all agents) ──
+  const now_t = Date.now() / 1000;
+  const hexA = v => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, '0');
+  for (let i = 0; i < agents.length; i++) {
+    for (let j = i+1; j < agents.length; j++) {
+      const a = agents[i], b = agents[j];
+      // Use smooth positions for distance calc too
+      const sa = agentSmooth[a.id] || a.position;
+      const sb = agentSmooth[b.id] || b.position;
+      const dx = sa.x - sb.x, dy = sa.y - sb.y;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      const maxDist = 900; // world units — always visible, fades with distance
+      const proximity = Math.max(0, 1 - dist / maxDist);
+      const pulse = 0.5 + Math.sin(now_t * 1.2 + i * 1.4 + j * 0.9) * 0.3;
+      const alpha = proximity * pulse;
+      const ca = toCanvasS(a), cb = toCanvasS(b);
+      if (ca.x === cb.x && ca.y === cb.y) continue;
+      const grad = ctx.createLinearGradient(ca.x, ca.y, cb.x, cb.y);
+      grad.addColorStop(0,   getColor(a.id) + hexA(alpha * 180));
+      grad.addColorStop(0.5, '#ffffff'       + hexA(alpha * 18));
+      grad.addColorStop(1,   getColor(b.id) + hexA(alpha * 180));
+      ctx.strokeStyle = grad;
+      ctx.lineWidth = 0.4 + proximity * 1.1;
+      const synced = a.synchronized && b.synchronized;
+      ctx.setLineDash(synced ? [] : [5, 8]);
+      ctx.beginPath(); ctx.moveTo(ca.x, ca.y); ctx.lineTo(cb.x, cb.y); ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+
+  // ── Connection particles — spawn every frame, between random agent pair ──
+  if (agents.length >= 2 && Math.random() < 0.45) {
+    const i = Math.floor(Math.random() * agents.length);
+    let j = Math.floor(Math.random() * (agents.length - 1));
+    if (j >= i) j++;
+    const a = agents[i], b = agents[j];
+    const ca = toCanvasS(a), cb = toCanvasS(b);
+    const dir = Math.random() < 0.5;
+    connParticles.push({
+      ax: a.id, bx: b.id, // track live agent ids so endpoints update with smooth
+      x1: dir ? ca.x : cb.x, y1: dir ? ca.y : cb.y,
+      x2: dir ? cb.x : ca.x, y2: dir ? cb.y : ca.y,
+      srcId: dir ? a.id : b.id,
+      dstId: dir ? b.id : a.id,
+      t: 0,
+      speed: 0.006 + Math.random() * 0.01,
+      color: getColor(dir ? a.id : b.id),
+      size: 1.3 + Math.random() * 0.9,
+    });
+    if (connParticles.length > 60) connParticles.shift();
+  }
+  // Draw + advance particles
+  connParticles = connParticles.filter(p => p.t <= 1);
+  for (const p of connParticles) {
+    p.t += p.speed;
+    // Use live smooth positions so particles track moving agents
+    const src = agents.find(a => a.id === p.srcId);
+    const dst = agents.find(a => a.id === p.dstId);
+    if (src && dst) {
+      const cs = toCanvasS(src), cd = toCanvasS(dst);
+      p.x1 = cs.x; p.y1 = cs.y;
+      p.x2 = cd.x; p.y2 = cd.y;
+    }
+    const px = p.x1 + (p.x2 - p.x1) * p.t;
+    const py = p.y1 + (p.y2 - p.y1) * p.t;
+    const fade = p.t < 0.08 ? p.t / 0.08 : p.t > 0.92 ? (1 - p.t) / 0.08 : 1;
+    ctx.globalAlpha = fade * 0.92;
+    const g = ctx.createRadialGradient(px, py, 0, px, py, p.size * 3.5);
+    g.addColorStop(0, p.color + 'dd');
+    g.addColorStop(1, p.color + '00');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(px, py, p.size * 3.5, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.arc(px, py, p.size * 0.6, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
 
   // Pheromone connections
   for (const p of pheromones) {
-    if (p.strength < 0.25) continue;
-    const src = agents.find(a=>a.id===p.agentId);
+    if (p.strength < 0.3) continue;
+    const src = agents.find(a => a.id === p.agentId);
     if (!src) continue;
     for (const cid of p.connections) {
-      const tp = pheromones.find(pp=>pp.id===cid);
-      const ta = tp && agents.find(a=>a.id===tp.agentId);
+      const tp = pheromones.find(pp => pp.id === cid);
+      const ta = tp && agents.find(a => a.id === tp.agentId);
       if (!ta) continue;
-      const col = pheromoneTypeColors[p.pheromoneType]||pheromoneTypeColors.knowledge;
-      ctx.strokeStyle = col + Math.round(p.strength*35).toString(16).padStart(2,'0');
-      ctx.lineWidth = 0.6;
+      const cs = toCanvasS(src), ct = toCanvasS(ta);
+      ctx.strokeStyle = getColor(p.agentId) + Math.round(p.strength * 22).toString(16).padStart(2,'0');
+      ctx.lineWidth = 0.5;
       ctx.beginPath();
-      ctx.moveTo(src.position.x*w/1000, src.position.y*h/800);
-      ctx.lineTo(ta.position.x*w/1000, ta.position.y*h/800);
+      ctx.moveTo(cs.x, cs.y);
+      ctx.lineTo(ct.x, ct.y);
       ctx.stroke();
     }
   }
 
-  // Pheromone particles
+  // Agent trails
+  for (const id in trails) {
+    const pts = trails[id];
+    const color = getColor(id);
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i];
+      const alpha = (1 - p.age / 28) * 0.35;
+      const r = (1 - p.age / 28) * 2.5;
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = color;
+      ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI*2); ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  // Pheromone glow blobs near agents
   for (const p of pheromones) {
-    if (p.strength < 0.1) continue;
-    const ag = agents.find(a=>a.id===p.agentId);
+    if (p.strength < 0.15) continue;
+    const ag = agents.find(a => a.id === p.agentId);
     if (!ag) continue;
-    const px = ag.position.x*w/1000 + (Math.random()-.5)*38;
-    const py = ag.position.y*h/800 + (Math.random()-.5)*38;
-    const col = p.agentId === 'human' ? '#f43f5e' : (pheromoneTypeColors[p.pheromoneType]||pheromoneTypeColors.knowledge);
-    ctx.beginPath();
-    ctx.arc(px, py, p.strength*2.2, 0, Math.PI*2);
-    ctx.fillStyle = col + Math.round(p.strength*55).toString(16).padStart(2,'0');
-    ctx.fill();
+    const { x: agx, y: agy } = toCanvasS(ag);
+    const px = agx + (Math.random()-.5)*45;
+    const py = agy + (Math.random()-.5)*45;
+    const col = p.agentId === 'human' ? '#f43f5e' : getColor(p.agentId);
+    ctx.globalAlpha = p.strength * 0.22;
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.arc(px, py, p.strength * 2.8, 0, Math.PI*2); ctx.fill();
   }
-
-  // Sync lines
-  if (transitioned) {
-    const synced = agents.filter(a=>a.synchronized);
-    ctx.strokeStyle = 'rgba(99,102,241,0.12)';
-    ctx.lineWidth = 0.5;
-    for (let i = 0; i < synced.length; i++) for (let j = i+1; j < synced.length; j++) {
-      ctx.beginPath();
-      ctx.moveTo(synced[i].position.x*w/1000, synced[i].position.y*h/800);
-      ctx.lineTo(synced[j].position.x*w/1000, synced[j].position.y*h/800);
-      ctx.stroke();
-    }
-  }
+  ctx.globalAlpha = 1;
 
   // Agents
-  for (let i = 0; i < agents.length; i++) {
-    const a = agents[i];
-    const x = a.position.x*w/1000, y = a.position.y*h/800;
+  for (const a of agents) {
+    const { x, y } = toCanvasS(a);
     const color = getColor(a.id);
     const r = a.synchronized ? 9 : 6;
     const isFocused = a.id === focusedAgentId;
 
+    // Update trail
+    addTrail(a.id, x, y);
+
+    // Sync halo
+    if (a.synchronized) {
+      const t = Date.now() / 1000;
+      const pulse = Math.sin(t * 2 + a.position.x) * 0.5 + 0.5;
+      const haloR = r + 12 + pulse * 5;
+      const g = ctx.createRadialGradient(x, y, r, x, y, haloR);
+      g.addColorStop(0, color + '28');
+      g.addColorStop(1, color + '00');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(x, y, haloR, 0, Math.PI*2); ctx.fill();
+    }
+
+    // Focus ring
     if (isFocused) {
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = color + '88';
+      ctx.lineWidth = 1.5;
       ctx.setLineDash([4,3]);
-      ctx.beginPath(); ctx.arc(x, y, r+8, 0, Math.PI*2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(x, y, r+10, 0, Math.PI*2); ctx.stroke();
       ctx.setLineDash([]);
     }
 
-    if (a.synchronized) {
-      const g = ctx.createRadialGradient(x,y,0,x,y,28);
-      g.addColorStop(0,color+'30'); g.addColorStop(1,color+'00');
-      ctx.fillStyle=g; ctx.beginPath(); ctx.arc(x,y,28,0,Math.PI*2); ctx.fill();
-    }
-
-    ctx.strokeStyle = color + Math.round(a.energy*180).toString(16).padStart(2,'0');
+    // Energy arc
+    ctx.strokeStyle = color + Math.round(a.energy * 160).toString(16).padStart(2,'0');
     ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.arc(x,y,r+3,0,Math.PI*2*a.energy); ctx.stroke();
+    ctx.beginPath(); ctx.arc(x, y, r+3, -Math.PI/2, -Math.PI/2 + Math.PI*2*a.energy); ctx.stroke();
 
+    // Agent glow
+    const glow = ctx.createRadialGradient(x, y, 0, x, y, r+4);
+    glow.addColorStop(0, color + 'aa');
+    glow.addColorStop(1, color + '00');
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(x, y, r+4, 0, Math.PI*2); ctx.fill();
+
+    // Agent dot
     ctx.fillStyle = color;
-    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill();
 
-    ctx.fillStyle = 'rgba(255,255,255,0.7)';
-    ctx.beginPath(); ctx.arc(x,y,r*.35,0,Math.PI*2); ctx.fill();
+    // Inner highlight
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    ctx.beginPath(); ctx.arc(x-r*.25, y-r*.25, r*.4, 0, Math.PI*2); ctx.fill();
 
-    ctx.fillStyle = '#555'; ctx.font = '9px -apple-system,sans-serif';
-    ctx.fillText(a.name, x+r+5, y+3);
+    // Label — Minecraft pixel font
+    const lx = x + r + 6, ly = y + 3;
+    ctx.font = '7px "Press Start 2P", monospace';
+    // Drop shadow (Minecraft style: 1px offset, dark)
+    ctx.fillStyle = 'rgba(0,0,0,0.9)';
+    ctx.fillText(a.name.toUpperCase(), lx+1, ly+1);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(a.name.toUpperCase(), lx, ly);
     if (a.currentAction && a.currentAction !== 'idle' && a.currentAction !== 'initializing') {
-      ctx.fillStyle = '#999'; ctx.font = '7px -apple-system,sans-serif';
-      const t = a.currentAction.length>24 ? a.currentAction.slice(0,24)+'..' : a.currentAction;
-      ctx.fillText(t, x+r+5, y+13);
+      const act = a.currentAction.length > 18 ? a.currentAction.slice(0,18)+'..' : a.currentAction;
+      ctx.font = '5px "Press Start 2P", monospace';
+      ctx.fillStyle = 'rgba(0,0,0,0.85)';
+      ctx.fillText(act, lx+1, ly+12);
+      ctx.fillStyle = color + 'dd';
+      ctx.fillText(act, lx, ly+11);
     }
   }
 
-  drawBubbles();
+  // Bubbles
+  const now = Date.now();
+  bubbles = bubbles.filter(b => now - b.born < BUBBLE_DUR);
+  for (const b of bubbles) {
+    const a = agents.find(ag => ag.id === b.agentId);
+    if (!a) continue;
+    const { x, y } = toCanvasS(a);
+    const age = now - b.born;
+    const alpha = age < 400 ? age/400 : age > 4500 ? 1-(age-4500)/1000 : 1;
+    const color = getColor(b.agentId);
+
+    ctx.font = '6px "Press Start 2P", monospace';
+    const maxW = 160, pad = 8, lh = 14;
+    const words = b.text.split(' ');
+    const lines = [];
+    let line = '';
+    for (const ww of words) {
+      const test = line ? line+' '+ww : ww;
+      if (ctx.measureText(test).width > maxW-pad*2) { if (line) lines.push(line); line = ww; }
+      else line = test;
+    }
+    if (line) lines.push(line);
+
+    const bw = maxW, bh = lines.length * lh + pad*2;
+    let bx = x+13, by = y-bh-10;
+    const cw = canvas.width/2, ch = canvas.height/2;
+    if (bx+bw > cw-8) bx = x-bw-13;
+    if (by < 8) by = y+14;
+
+    ctx.globalAlpha = alpha * 0.95;
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.beginPath(); ctx.roundRect(bx+2, by+2, bw, bh, 7); ctx.fill();
+    // BG
+    ctx.fillStyle = 'rgba(13,15,23,0.94)';
+    ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 7); ctx.fill();
+    // Accent border
+    ctx.strokeStyle = color + '55';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.roundRect(bx, by, bw, bh, 7); ctx.stroke();
+    // Color bar
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.roundRect(bx, by, 2.5, bh, [7,0,0,7]); ctx.fill();
+    // Text (Minecraft shadow)
+    ctx.font = '6px "Press Start 2P", monospace';
+    ctx.fillStyle = 'rgba(0,0,0,0.8)';
+    lines.forEach((l, i) => ctx.fillText(l, bx+pad+5, by+pad+i*lh+11));
+    ctx.fillStyle = 'rgba(220,225,255,0.95)';
+    lines.forEach((l, i) => ctx.fillText(l, bx+pad+4, by+pad+i*lh+10));
+    ctx.globalAlpha = 1;
+  }
+
+  ageTrails();
 }
 
-// ── Inject topic ──
+// ── 60fps render loop ──
+let transitioned = false;
+function animate() {
+  if (document.getElementById('panel-live').classList.contains('active')) {
+    drawFrame(transitioned);
+  }
+  requestAnimationFrame(animate);
+}
+animate();
+
+// ── Inject ──
 async function injectTopic() {
   const input = document.getElementById('inject-input');
   const topic = input.value.trim();
   if (!topic) return;
-
   try {
     await fetch(API+'/api/inject', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({ topic, content: `Swarm, explore this: ${topic}` })
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic, content: `Signal injected: ${topic}` }),
     });
-
-    // Add a bubble on all agents briefly
-    for (const a of agents) addBubble(a.id, `💡 ${topic}`);
-
+    for (const a of agents) addBubble(a.id, topic);
     input.value = '';
-    const fb = document.getElementById('inject-feedback');
-    fb.classList.add('show');
-    setTimeout(() => fb.classList.remove('show'), 2000);
-  } catch { /* noop */ }
+    const ok = document.getElementById('inject-ok');
+    ok.classList.add('show');
+    setTimeout(() => ok.classList.remove('show'), 2000);
+  } catch {}
 }
-
-document.getElementById('inject-input').addEventListener('keydown', e => {
-  if (e.key === 'Enter') injectTopic();
-});
+document.getElementById('inject-input').addEventListener('keydown', e => { if (e.key === 'Enter') injectTopic(); });
 
 // ── Collective memory renderer ──
-function renderCollectiveMemory(m) {
-  const timeAgo  = timeSince(m.createdAt);
-  const confPct  = Math.round((m.confidence||0)*100);
-  const r        = m.report;
-
-  const contribNames = (m.contributors||[]).map(id => {
-    const ag = agents.find(a => a.id === id);
-    return ag ? ag.name : id.slice(0,8);
-  }).join(', ');
+function renderMemory(m) {
+  const r = m.report;
+  const contribs = (m.contributors||[]).map(id => agents.find(a=>a.id===id)?.name || id.slice(0,6)).join(', ');
 
   let html = `<div class="collective-card">
-    <div class="collective-header">
-      <div class="collective-title">${m.topic}</div>
-      <div class="collective-meta">
-        <span class="collective-meta-item">🕐 ${timeAgo}</span>
-        <span class="collective-meta-item">⬤ ${confPct}% confidence</span>
-        ${contribNames ? `<span class="collective-meta-item">👾 ${contribNames}</span>` : ''}
-      </div>
+    <div class="collective-title">${m.topic}</div>
+    <div class="collective-meta">
+      <span class="mono">${timeSince(m.createdAt)} ago</span>
+      <span class="mono">${Math.round((m.confidence||0)*100)}% confidence</span>
+      ${contribs ? `<span>${contribs}</span>` : ''}
     </div>`;
 
   if (!r) {
-    // No LLM report yet — show raw synthesis as fallback
-    const lines = (m.synthesis||'').split('\n\n').filter(Boolean).slice(0,5);
-    if (lines.length > 0) {
-      html += `<div class="collective-fallback">${lines.map(l=>l.slice(0,300)).join('\n\n')}</div>`;
-    } else {
-      html += `<div class="collective-generating"><div class="generating-dot"></div>Generating report...</div>`;
-    }
+    const lines = (m.synthesis||'').split('\n\n').filter(Boolean).slice(0,4);
+    html += lines.length
+      ? `<div class="collective-fallback">${lines.map(l=>l.slice(0,280)).join('\n\n')}</div>`
+      : `<div class="collective-pending"><div class="pending-dot"></div>Generating report...</div>`;
   } else {
-    if (r.overview) {
-      html += `<div class="report-block">
-        <div class="report-label overview">📋 Overview</div>
-        <div class="report-prose overview">${r.overview}</div>
-      </div>`;
-    }
-
-    if (r.keyFindings && r.keyFindings.length > 0) {
-      html += `<div class="report-block">
-        <div class="report-label findings">🔍 Key Findings</div>
-        <ul class="report-list findings">
-          ${r.keyFindings.map(f=>`<li>${f}</li>`).join('')}
-        </ul>
-      </div>`;
-    }
-
-    if (r.opinions) {
-      html += `<div class="report-block">
-        <div class="report-label opinions">💬 Our Take</div>
-        <div class="report-prose opinions">${r.opinions}</div>
-      </div>`;
-    }
-
-    if (r.improvements && r.improvements.length > 0) {
-      html += `<div class="report-block">
-        <div class="report-label improve">⚠️ What Could Be Better</div>
-        <ul class="report-list improve">
-          ${r.improvements.map(i=>`<li>${i}</li>`).join('')}
-        </ul>
-      </div>`;
-    }
-
-    if (r.verdict) {
-      html += `<div class="report-block">
-        <div class="report-label verdict">✅ Verdict</div>
-        <div class="report-prose verdict">${r.verdict}</div>
-      </div>`;
-    }
+    if (r.overview) html += `<div class="report-block"><div class="report-label overview">Overview</div><div class="report-prose overview">${r.overview}</div></div>`;
+    if (r.keyFindings?.length) html += `<div class="report-block"><div class="report-label findings">Key Findings</div><ul class="report-list findings">${r.keyFindings.map(f=>`<li>${f}</li>`).join('')}</ul></div>`;
+    if (r.opinions) html += `<div class="report-block"><div class="report-label opinions">Scientific Take</div><div class="report-prose opinions">${r.opinions}</div></div>`;
+    if (r.improvements?.length) html += `<div class="report-block"><div class="report-label improve">Gaps</div><ul class="report-list improve">${r.improvements.map(i=>`<li>${i}</li>`).join('')}</ul></div>`;
+    if (r.verdict) html += `<div class="report-block"><div class="report-label verdict">Verdict</div><div class="report-prose verdict">${r.verdict}</div></div>`;
   }
 
-  html += `</div>`;
-  return html;
+  return html + '</div>';
 }
 
 // ── Report ──
@@ -935,32 +1303,32 @@ async function fetchReport() {
   try {
     const r = await fetch(API+'/api/report').then(r=>r.json());
     renderReport(r);
-  } catch { }
+  } catch {}
 }
 
 function renderReport(report) {
   if (!report) return;
   const insights = report.topInsights || [];
   let html = `<div class="report-section">
-    <div class="report-section-header">
+    <div class="report-section-head">
       <span class="report-section-title">Top Insights</span>
-      <span class="report-section-count">${insights.length}</span>
+      <span class="report-count">${insights.length}</span>
     </div>`;
 
   if (!insights.length) {
-    html += '<div class="empty-state"><div class="empty-state-icon">🧠</div>Agents are still forming insights...</div>';
+    html += '<div class="empty"><div class="empty-icon">·</div>Agents forming insights...</div>';
   } else {
     insights.forEach(ins => {
-      const color = getColor(agents.find(a=>a.name===ins.agentName)?.id||'');
-      const confPct = Math.round((ins.confidence||0)*100);
+      const ag = agents.find(a=>a.name===ins.agentName);
+      const color = getColor(ag?.id||'');
       html += `<div class="insight-card">
-        <div class="insight-header">
-          <span class="insight-agent-tag" style="background:${color||'#6366f1'}">${ins.agentName}</span>
+        <div class="insight-head">
+          <span class="insight-tag" style="background:${color||'#6366f1'}">${ins.agentName}</span>
           <span class="insight-trigger">${ins.trigger||'analysis'}</span>
-          <span class="insight-confidence">${confPct}%</span>
+          <span class="insight-conf">${Math.round((ins.confidence||0)*100)}%</span>
         </div>
         <div class="insight-conclusion">${ins.conclusion||''}</div>
-        ${ins.reasoning?`<div class="insight-reasoning">${ins.reasoning.slice(0,280)}${ins.reasoning.length>280?'...':''}</div>`:''}
+        ${ins.reasoning?`<div class="insight-reasoning">${ins.reasoning.slice(0,260)}${ins.reasoning.length>260?'...':''}</div>`:''}
         ${ins.suggestedActions?.length?`<div class="insight-actions">${ins.suggestedActions.slice(0,4).map(a=>`<span class="action-tag">${a}</span>`).join('')}</div>`:''}
       </div>`;
     });
@@ -968,53 +1336,44 @@ function renderReport(report) {
 
   const memories = report.collectiveMemories||[];
   if (memories.length) {
-    html += `<div class="report-section">
-      <div class="report-section-header">
-        <span class="report-section-title">Collective Memories</span>
-        <span class="report-section-count">${memories.length}</span>
-      </div>`;
+    html += `<div class="report-section"><div class="report-section-head"><span class="report-section-title">Collective Memories</span><span class="report-count">${memories.length}</span></div>`;
     memories.slice(-5).reverse().forEach(m => {
       html += `<div class="memory-card">
         <div class="memory-topic">${m.topic}</div>
-        <div class="memory-synthesis">${(m.synthesis||'').slice(0,300)}</div>
-        <div class="memory-meta">${(m.contributors||[]).length} contributors · confidence ${(m.confidence||0).toFixed(2)}</div>
+        <div class="memory-synthesis">${(m.synthesis||'').slice(0,280)}</div>
+        <div class="memory-meta">${(m.contributors||[]).length} contributors · ${(m.confidence||0).toFixed(2)} confidence</div>
       </div>`;
     });
     html += '</div>';
   }
-
   html += '</div>';
   document.getElementById('report-main').innerHTML = html;
 
-  // Datasets aside
   const repos = report.reposStudied||[];
   document.getElementById('report-repos').innerHTML = repos.length
     ? repos.map(r=>`<div class="repo-item">
-        <div class="repo-icon">🔭</div>
+        <div class="repo-icon">◎</div>
         <div><div class="repo-name">${(r.topic||r.owner+'/'+r.repo).replace(/_/g,' ')}</div>
-        <div style="font-size:10px;color:var(--text-3);margin-bottom:3px">${r.timeRange||''}</div>
-        <div class="studied-by-tags">${(r.studiedBy||[]).map(n=>`<span class="studied-by-tag">${n}</span>`).join('')}</div></div>
+        <div style="font-size:10px;color:var(--text-3);margin-bottom:2px">${r.timeRange||''}</div>
+        <div class="studied-tags">${(r.studiedBy||[]).map(n=>`<span class="studied-tag">${n}</span>`).join('')}</div></div>
       </div>`).join('')
-    : '<div class="empty-state"><div class="empty-state-icon">🔭</div>None yet</div>';
+    : '<div class="empty"><div class="empty-icon">·</div>None yet</div>';
 
-  // Agent summaries aside
   const summaries = report.agentSummaries||[];
-  document.getElementById('report-agent-summaries').innerHTML = summaries.map(s=>{
-    const color = getColor(agents.find(a=>a.name===s.name)?.id||'');
-    return `<div style="padding:10px;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;background:var(--surface)">
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
-        <div style="width:24px;height:24px;border-radius:50%;background:${color||'#6366f1'};display:flex;align-items:center;justify-content:center;color:white;font-size:9px;font-weight:700">${(s.name||'').slice(0,2)}</div>
-        <div><div style="font-weight:600;font-size:12px">${s.name}</div><div style="font-size:10.5px;color:var(--text-3)">${s.specialization} · ${s.thoughtCount} thoughts</div></div>
+  document.getElementById('report-summaries').innerHTML = summaries.map(s=>{
+    const ag = agents.find(a=>a.name===s.name);
+    const color = getColor(ag?.id||'');
+    return `<div style="padding:9px;border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:7px;background:var(--surface)">
+      <div style="display:flex;align-items:center;gap:7px;margin-bottom:5px">
+        <div style="width:22px;height:22px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;color:white;font-size:9px;font-weight:700">${(s.name||'').slice(0,2)}</div>
+        <div><div style="font-weight:600;font-size:12px">${s.name}</div><div style="font-size:10px;color:var(--text-3)">${s.specialization} · ${s.thoughtCount} thoughts</div></div>
       </div>
-      ${s.topConclusions?.length?`<div style="font-size:11px;color:var(--text-2);line-height:1.5;background:var(--bg);padding:6px 8px;border-radius:6px">${s.topConclusions[0].conclusion.slice(0,150)}...</div>`:''}
+      ${s.topConclusions?.length?`<div style="font-size:11px;color:var(--text-2);line-height:1.5;background:var(--surface-2);padding:5px 7px;border-radius:5px">${s.topConclusions[0].conclusion.slice(0,150)}...</div>`:''}
     </div>`;
   }).join('');
 }
 
-// ── Track previous thoughts to detect new ones for bubbles ──
-let prevThoughtIds = new Set();
-
-// ── Main refresh ──
+// ── Main data refresh (600ms) ──
 async function refresh() {
   try {
     const [stateRes, agentsRes, pheroRes, collectRes, thoughtsRes] = await Promise.all([
@@ -1025,198 +1384,190 @@ async function refresh() {
       fetch(API+'/api/thoughts').then(r=>r.json()).catch(()=>[]),
     ]);
 
-    agents = agentsRes; pheromones = pheroRes;
+    // Detect new pheromones — add drift burst
+    if (pheroRes.length > lastPheromoneCount) {
+      const newOnes = pheroRes.slice(0, pheroRes.length - lastPheromoneCount);
+      for (const p of newOnes) {
+        const ag = agentsRes.find(a => a.id === p.agentId);
+        if (ag) {
+          const pos = { position: ag.position };
+          const { x, y } = toCanvas(pos);
+          addDrift(x, y, getColor(ag.id));
+          flashRings.push({ x, y, r: 6, life: 1.0, color: getColor(ag.id) });
+        }
+      }
+    }
+    lastPheromoneCount = pheroRes.length;
 
-    // Detect new thoughts → spawn chat bubbles
+    agents = agentsRes;
+    pheromones = pheroRes;
+    transitioned = stateRes.phaseTransitionOccurred;
+
+    // New thoughts → bubbles
     for (const t of thoughtsRes) {
       if (!prevThoughtIds.has(t.id) && t.conclusion) {
         addBubble(t.agentId, t.conclusion);
         prevThoughtIds.add(t.id);
       }
     }
-    if (prevThoughtIds.size > 200) prevThoughtIds = new Set([...prevThoughtIds].slice(-100));
+    if (prevThoughtIds.size > 300) prevThoughtIds = new Set([...prevThoughtIds].slice(-150));
 
     // Header
     document.getElementById('h-step').textContent = stateRes.step;
-    document.getElementById('h-pheromones').textContent = stateRes.metrics.totalPheromones;
-    document.getElementById('h-discoveries').textContent = stateRes.metrics.totalDiscoveries;
+    document.getElementById('h-phero').textContent = stateRes.metrics.totalPheromones;
+    document.getElementById('h-disc').textContent = stateRes.metrics.totalDiscoveries;
     document.getElementById('h-synced').textContent = `${stateRes.metrics.synchronizedCount}/${agentsRes.length}`;
-    document.getElementById('h-tokens').textContent = formatTokens(stateRes.totalTokens||0);
+    document.getElementById('h-tokens').textContent = fmtTokens(stateRes.totalTokens||0);
     document.getElementById('h-density').textContent = (stateRes.density||0).toFixed(3);
 
+    const totalCr = agentsRes.reduce((s,a)=>s+((a.credits||{}).balance||0),0);
+    document.getElementById('h-credits').textContent = totalCr.toFixed(0)+'cr';
+    const lowestTier = agentsRes.some(a=>(a.credits||{}).tier==='dead') ? 'dead'
+      : agentsRes.some(a=>(a.credits||{}).tier==='critical') ? 'critical'
+      : agentsRes.some(a=>(a.credits||{}).tier==='low_compute') ? 'low_compute' : 'normal';
+    const chip = document.getElementById('h-credits-chip');
+    chip.style.borderColor = lowestTier!=='normal' ? tierColor(lowestTier) : '';
+
+    // Phase transition
     if (stateRes.phaseTransitionOccurred && !prevTransition) {
-      document.getElementById('h-transition').style.display = 'flex';
-      document.getElementById('flash').classList.add('active');
-      setTimeout(()=>document.getElementById('flash').classList.remove('active'), 2000);
+      document.getElementById('h-phase').style.display = 'flex';
+      document.getElementById('flash').classList.add('go');
+      setTimeout(()=>document.getElementById('flash').classList.remove('go'), 2500);
+      triggerBurst();
     }
     prevTransition = stateRes.phaseTransitionOccurred;
-    if (stateRes.phaseTransitionOccurred) document.getElementById('h-transition').style.display = 'flex';
+    if (stateRes.phaseTransitionOccurred) document.getElementById('h-phase').style.display = 'flex';
 
     // Density bar
-    const density = stateRes.density||0, threshold = stateRes.criticalThreshold||0.6;
+    const density = stateRes.density||0;
+    const threshold = stateRes.criticalThreshold||0.35;
     const fill = document.getElementById('density-fill');
     fill.style.width = `${Math.min(density*100,100)}%`;
     fill.style.background = density >= threshold
       ? 'linear-gradient(90deg,#6366f1,#ec4899)'
-      : 'linear-gradient(90deg,#93c5fd,#6366f1)';
-    document.getElementById('density-label').textContent = `Density ${density.toFixed(3)}`;
-    document.getElementById('density-threshold-label').textContent = `Threshold ${threshold.toFixed(2)}`;
+      : 'linear-gradient(90deg,#38bdf8,#6366f1)';
+    document.getElementById('density-label').textContent = `density ${density.toFixed(3)}`;
+    document.getElementById('density-thresh-label').textContent = `threshold ${threshold.toFixed(2)}`;
     document.getElementById('density-marker').style.left = `${threshold*100}%`;
 
-    // Agent list sidebar
+    // Agent list
     document.getElementById('agent-list').innerHTML = agentsRes.map(a => {
       const color = getColor(a.id);
-      const initials = (a.name||'').slice(0,2);
-      const action = (a.currentAction||'idle').length>22 ? a.currentAction.slice(0,22)+'..' : a.currentAction||'idle';
-      const isFocused = a.id === focusedAgentId;
-      const cr = a.credits || { balance: 100, tier: 'normal' };
-      const tierDot = cr.tier === 'normal' ? 'var(--green)' : cr.tier === 'low_compute' ? 'var(--amber)' : '#dc2626';
-      return `<div class="agent-row ${a.synchronized?'synced':''} ${isFocused?'focused':''}" onclick="openFocus('${a.id}')">
-        <div class="agent-avatar" style="background:${color}">${initials}</div>
-        <div class="agent-info"><div class="agent-name">${a.name}</div><div class="agent-action-text">${action}</div></div>
-        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">
-          <div class="agent-discoveries">${a.discoveries}</div>
-          <div style="display:flex;align-items:center;gap:3px;font-size:9.5px;color:var(--text-3)">
-            <div style="width:5px;height:5px;border-radius:50%;background:${tierDot}"></div>
-            ${cr.balance.toFixed(0)}cr
-          </div>
+      const cr = a.credits||{balance:100,tier:'normal'};
+      const action = (a.currentAction||'idle').length>24 ? a.currentAction.slice(0,24)+'..' : a.currentAction||'idle';
+      return `<div class="agent-row ${a.synchronized?'synced':''} ${a.id===focusedAgentId?'focused':''}" onclick="openFocus('${a.id}')">
+        <div class="agent-av" style="background:${color}">${(a.name||'').slice(0,2)}</div>
+        <div class="agent-info"><div class="agent-name">${a.name}</div><div class="agent-action">${action}</div></div>
+        <div class="agent-meta">
+          <div class="agent-disc">${a.discoveries}</div>
+          <div class="agent-cr"><div class="cr-dot" style="background:${tierColor(cr.tier)}"></div>${cr.balance.toFixed(0)}cr</div>
         </div>
       </div>`;
     }).join('');
 
-    // Header credits pill
-    const totalCredits = agentsRes.reduce((s,a) => s + ((a.credits||{}).balance||0), 0);
-    const lowestTier = agentsRes.some(a => (a.credits||{}).tier === 'dead') ? 'dead'
-      : agentsRes.some(a => (a.credits||{}).tier === 'critical') ? 'critical'
-      : agentsRes.some(a => (a.credits||{}).tier === 'low_compute') ? 'low_compute' : 'normal';
-    const pill = document.getElementById('h-credits-pill');
-    if (lowestTier !== 'normal') {
-      pill.style.background = lowestTier === 'dead' ? '#f3f4f6' : lowestTier === 'critical' ? '#fee2e2' : 'var(--amber-soft)';
-      pill.style.borderColor = lowestTier === 'dead' ? '#d1d5db' : lowestTier === 'critical' ? '#fca5a5' : '#fde68a';
-    } else { pill.style.background = ''; pill.style.borderColor = ''; }
-    document.getElementById('h-credits').textContent = totalCredits.toFixed(0) + 'cr';
-
-    // Live thoughts
-    const items = thoughtsRes.length > 0 ? thoughtsRes : pheromones.sort((a,b)=>b.timestamp-a.timestamp);
+    // Live feed — only repaint when the top-5 items actually change
+    const items = thoughtsRes.length > 0 ? thoughtsRes : pheroRes.sort((a,b)=>b.timestamp-a.timestamp);
     if (items.length > 0) {
-      document.getElementById('thought-feed').innerHTML = items.slice(0,6).map(t => {
-        const ag = agentsRes.find(a=>a.id===t.agentId);
-        const color = getColor(t.agentId);
-        const text = t.conclusion || t.content || '';
-        return `<div class="thought-card">
-          <div class="thought-meta">
-            <span class="thought-agent-name" style="color:${color}">${ag?.name||'?'}</span>
-            ${t.confidence!=null?`<span class="confidence-badge">${Math.round(t.confidence*100)}%</span>`:''}
-          </div>
-          <div class="thought-text">${text.slice(0,130)}${text.length>130?'...':''}</div>
-        </div>`;
-      }).join('');
+      const feedKey = items.slice(0,5).map(t => (t.id||'') + '|' + (t.timestamp||'')).join(',');
+      if (feedKey !== lastFeedKey) {
+        lastFeedKey = feedKey;
+        document.getElementById('thought-feed').innerHTML = items.slice(0,5).map(t => {
+          const ag = agentsRes.find(a=>a.id===t.agentId);
+          const color = getColor(t.agentId);
+          const text = t.conclusion || t.content || '';
+          return `<div class="thought-card">
+            <div class="thought-meta">
+              <span class="thought-who" style="color:${color}">${ag?.name||'?'}</span>
+              ${t.confidence!=null?`<span class="conf-badge">${Math.round(t.confidence*100)}%</span>`:''}
+            </div>
+            <div class="thought-text">${text.slice(0,120)}${text.length>120?'...':''}</div>
+          </div>`;
+        }).join('');
+      }
     }
 
-    // Agents grid tab
+    // Agents grid
     document.getElementById('agents-grid').innerHTML = agentsRes.map(a=>{
       const color = getColor(a.id);
-      const initials = (a.name||'').slice(0,2);
       const tokenPct = Math.min((a.tokensUsed||0)/(a.tokenBudget||1)*100,100).toFixed(0);
-      const cr = a.credits || { balance: 100, earned: 0, spent: 0, tier: 'normal' };
-      const crPct = Math.min((cr.balance/200)*100, 100).toFixed(0);
-      return `<div class="agent-card" onclick="switchTab('live');setTimeout(()=>openFocus('${a.id}'),50)" style="cursor:pointer">
-        <div class="agent-card-header">
-          <div class="agent-card-avatar" style="background:${color}">${initials}</div>
+      const cr = a.credits||{balance:100,earned:0,spent:0,tier:'normal'};
+      const crPct = Math.min(cr.balance/200*100,100).toFixed(0);
+      return `<div class="agent-card" onclick="switchTab('live');setTimeout(()=>openFocus('${a.id}'),50)">
+        <div class="agent-card-head">
+          <div class="agent-card-av" style="background:${color}">${(a.name||'').slice(0,2)}</div>
           <div><div class="agent-card-name">${a.name}</div>
-          <div class="agent-card-spec">${a.specialization||''} ${a.synchronized?'<span class="synced-tag">✓ Synced</span>':''}</div></div>
+          <div class="agent-card-spec">${a.specialization||''} ${a.synchronized?'<span class="synced-badge">Synced</span>':''}</div></div>
         </div>
-        <div class="agent-stats-row">
+        <div class="stats-row">
           <div class="stat-box"><div class="stat-box-val">${a.discoveries||0}</div><div class="stat-box-lbl">Found</div></div>
           <div class="stat-box"><div class="stat-box-val">${a.thoughtCount||0}</div><div class="stat-box-lbl">Thoughts</div></div>
           <div class="stat-box"><div class="stat-box-val">${a.absorbed||0}</div><div class="stat-box-lbl">Absorbed</div></div>
         </div>
-        <div class="credit-bar-wrap">
-          <div class="credit-bar-row">
-            <span>Credits ${tierLabel(cr.tier)}</span>
-            <span style="font-weight:600;color:${creditBarColor(cr.tier)}">${cr.balance.toFixed(1)}cr</span>
-          </div>
-          <div class="credit-bar-track"><div class="credit-bar-fill" style="width:${crPct}%;background:${creditBarColor(cr.tier)}"></div></div>
-          <div class="selfmod-tag">+${cr.earned.toFixed(1)} earned · -${cr.spent.toFixed(1)} spent</div>
+        <div class="bar-wrap">
+          <div class="bar-label"><span>Credits ${tierPill(cr.tier)}</span><span style="color:${tierColor(cr.tier)}">${cr.balance.toFixed(1)}cr</span></div>
+          <div class="bar-track"><div class="bar-fill credit-fill-${cr.tier}" style="width:${crPct}%"></div></div>
+          <div style="font-size:10px;color:var(--text-3);margin-top:2px;font-family:'JetBrains Mono',monospace">+${cr.earned.toFixed(1)} earned &nbsp; -${cr.spent.toFixed(1)} spent</div>
         </div>
-        <div class="token-bar-wrap">
-          <div class="token-bar-label"><span>Token budget</span><span>${formatTokens(a.tokensUsed||0)} / ${formatTokens(a.tokenBudget||0)}</span></div>
-          <div class="token-bar-track"><div class="token-bar-fill" style="width:${tokenPct}%"></div></div>
+        <div class="bar-wrap">
+          <div class="bar-label"><span>Token budget</span><span>${fmtTokens(a.tokensUsed||0)} / ${fmtTokens(a.tokenBudget||0)}</span></div>
+          <div class="bar-track"><div class="bar-fill token-fill" style="width:${tokenPct}%"></div></div>
         </div>
-        ${a.latestThought?`<div class="latest-thought-box">${a.latestThought.slice(0,160)}${a.latestThought.length>160?'...':''}</div>`:''}
+        ${a.latestThought?`<div class="latest-box">${a.latestThought.slice(0,150)}${a.latestThought.length>150?'...':''}</div>`:''}
       </div>`;
     }).join('');
 
-    // Pheromones tab
-    document.getElementById('pheromone-list').innerHTML = pheromones.length > 0
-      ? pheromones.sort((a,b)=>b.timestamp-a.timestamp).slice(0,60).map(p=>{
+    // Pheromones
+    document.getElementById('pheromone-list').innerHTML = pheroRes.length > 0
+      ? pheroRes.sort((a,b)=>b.timestamp-a.timestamp).slice(0,60).map(p=>{
           const ag = agentsRes.find(a=>a.id===p.agentId);
-          const color = p.agentId==='human' ? '#f43f5e' : (pheromoneTypeColors[p.pheromoneType]||pheromoneTypeColors.knowledge);
-          const isHuman = p.agentId==='human';
-          return `<div class="pheromone-row ${isHuman?'human-pheromone':''}">
-            <div class="pheromone-type-dot" style="background:${color}"></div>
+          const color = p.agentId==='human' ? '#f43f5e' : getColor(p.agentId);
+          return `<div class="pheromone-row ${p.agentId==='human'?'human':''}">
+            <div class="p-dot" style="background:${color}"></div>
             <div>
-              <div class="pheromone-content">${(p.content||'').slice(0,140)}</div>
-              <div class="pheromone-meta">${isHuman?'🧑 You':ag?.name||'?'} · ${p.domain||''} · ${timeSince(p.timestamp)}</div>
+              <div class="p-content">${(p.content||'').slice(0,140)}</div>
+              <div class="p-meta">${p.agentId==='human'?'You':ag?.name||'?'} · ${p.domain||''} · ${timeSince(p.timestamp)}</div>
             </div>
-            <div class="pheromone-strength">${(p.strength||0).toFixed(2)}</div>
+            <div class="p-strength">${(p.strength||0).toFixed(2)}</div>
           </div>`;
         }).join('')
-      : '<div class="empty-state"><div class="empty-state-icon">◎</div>No pheromones yet</div>';
+      : '<div class="empty"><div class="empty-icon">·</div>No signals yet</div>';
 
-    // Credits tab
-    document.getElementById('credits-grid').innerHTML = agentsRes.map(a => {
+    // Collective
+    document.getElementById('collective-list').innerHTML = collectRes.length > 0
+      ? collectRes.slice(-10).reverse().map(renderMemory).join('')
+      : '<div class="empty"><div class="empty-icon">·</div>Waiting for phase transition...</div>';
+
+    // Credits grid
+    document.getElementById('credits-grid').innerHTML = agentsRes.map(a=>{
       const color = getColor(a.id);
-      const cr = a.credits || { balance: 100, earned: 0, spent: 0, tier: 'normal', distressEmitted: false };
-      const crPct = Math.min((cr.balance / 200) * 100, 100).toFixed(0);
-      return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;box-shadow:var(--shadow)">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-          <div style="width:36px;height:36px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;color:white;font-size:12px;font-weight:700">${(a.name||'').slice(0,2)}</div>
-          <div>
-            <div style="font-weight:700;font-size:13px">${a.name}</div>
-            <div style="font-size:11px;color:var(--text-3);margin-top:1px">${a.specialization||''} ${tierLabel(cr.tier)}</div>
-          </div>
+      const cr = a.credits||{balance:100,earned:0,spent:0,tier:'normal',distressEmitted:false};
+      const crPct = Math.min(cr.balance/200*100,100).toFixed(0);
+      return `<div class="credit-card">
+        <div style="display:flex;align-items:center;gap:9px;margin-bottom:11px">
+          <div style="width:32px;height:32px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;color:white;font-size:11px;font-weight:700">${(a.name||'').slice(0,2)}</div>
+          <div><div style="font-weight:700;font-size:13px">${a.name}</div>
+          <div style="font-size:10.5px;color:var(--text-3);margin-top:1px">${a.specialization||''} ${tierPill(cr.tier)}</div></div>
         </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:12px">
-          <div style="background:var(--bg);border-radius:var(--radius-sm);padding:6px;text-align:center">
-            <div style="font-size:18px;font-weight:700;color:${creditBarColor(cr.tier)}">${cr.balance.toFixed(1)}</div>
-            <div style="font-size:9.5px;color:var(--text-3);text-transform:uppercase">Balance</div>
-          </div>
-          <div style="background:var(--bg);border-radius:var(--radius-sm);padding:6px;text-align:center">
-            <div style="font-size:18px;font-weight:700;color:var(--green)">+${cr.earned.toFixed(1)}</div>
-            <div style="font-size:9.5px;color:var(--text-3);text-transform:uppercase">Earned</div>
-          </div>
-          <div style="background:var(--bg);border-radius:var(--radius-sm);padding:6px;text-align:center">
-            <div style="font-size:18px;font-weight:700;color:#dc2626">-${cr.spent.toFixed(1)}</div>
-            <div style="font-size:9.5px;color:var(--text-3);text-transform:uppercase">Spent</div>
-          </div>
+        <div class="credit-grid">
+          <div class="credit-stat"><div class="credit-stat-val" style="color:${tierColor(cr.tier)}">${cr.balance.toFixed(1)}</div><div class="credit-stat-lbl">Balance</div></div>
+          <div class="credit-stat"><div class="credit-stat-val" style="color:var(--green)">+${cr.earned.toFixed(1)}</div><div class="credit-stat-lbl">Earned</div></div>
+          <div class="credit-stat"><div class="credit-stat-val" style="color:var(--red)">-${cr.spent.toFixed(1)}</div><div class="credit-stat-lbl">Spent</div></div>
         </div>
-        <div class="credit-bar-track" style="margin-bottom:8px"><div class="credit-bar-fill" style="width:${crPct}%;background:${creditBarColor(cr.tier)}"></div></div>
-        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-3)">
-          <span>Tokens: <strong>${formatTokens(a.tokensUsed||0)}</strong></span>
-          <span style="${cr.distressEmitted?'color:#dc2626;font-weight:600':''}${cr.distressEmitted?' ':'display:none'}"">⚠ Distress</span>
+        <div class="bar-track"><div style="height:3px;border-radius:2px;transition:width .5s;background:${tierColor(cr.tier)};width:${crPct}%"></div></div>
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-3);margin-top:6px;font-family:'JetBrains Mono',monospace">
+          <span>Tokens: ${fmtTokens(a.tokensUsed||0)}</span>
+          ${cr.distressEmitted?'<span style="color:var(--red);font-weight:600">Distress</span>':''}
         </div>
       </div>`;
     }).join('');
 
-    // Collective tab
-    document.getElementById('collective-list').innerHTML = collectRes.length > 0
-      ? collectRes.slice(-10).reverse().map(m => renderCollectiveMemory(m)).join('')
-      : '<div class="empty-state"><div class="empty-state-icon">🌐</div>Waiting for phase transition...</div>';
-
-    // Refresh focus panel if open
     if (focusedAgentId) renderFocusPanel();
-
-    // Draw
-    if (document.getElementById('panel-live').classList.contains('active')) {
-      drawSwarm(stateRes.phaseTransitionOccurred);
-    }
-
     if (document.getElementById('panel-report').classList.contains('active')) fetchReport();
-  } catch { }
+
+  } catch {}
 }
 
-setInterval(refresh, 800);
+setInterval(refresh, 600);
 refresh();
 </script>
 </body>
