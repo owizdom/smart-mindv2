@@ -81,6 +81,8 @@ Every finding is signed with the agent's Ed25519 keypair and anchored to the Eig
 │               ║   Collective memory     ║                      │
 │               ║   LLM narrative report  ║                      │
 │               ║   EigenDA anchoring     ║                      │
+│               ║   Channel resets →      ║                      │
+│               ║   new cycle begins      ║                      │
 │               ╚═════════════════════════╝                      │
 └─────────────────────────────────────────────────────────────────┘
                             │
@@ -104,6 +106,17 @@ Pheromone propagation is pure gossip:
 - Agent emits → POSTs to all peer URLs
 - Agent polls peers every tick to absorb their pheromones
 - Phase transition is detected locally by each agent independently
+
+### Continuous Cycling
+
+The swarm doesn't stop after one phase transition. When density crosses the critical threshold:
+
+1. A collective report is generated (LLM narrative, EigenDA-anchored)
+2. The pheromone channel resets immediately — old signals rejected by timestamp
+3. A 12-step lockout prevents immediate re-transition (~24s cooldown)
+4. Agents resume exploration; density climbs again toward the next transition
+
+Each run produces multiple collective memories, accumulating over time.
 
 ---
 
@@ -147,10 +160,13 @@ Density crosses the critical threshold. Agents synchronize. The swarm generates 
 - What could have been done better
 - A final verdict
 
+Then the channel resets and a new cycle begins.
+
 ```
 Density: ████████████████████ 0.62
 ⚡ PHASE TRANSITION — COLLECTIVE INTELLIGENCE
 [COLLECTIVE] Anchoring to EigenDA: 0x3af7b2c1…
+[Channel reset] New cycle begins — step lockout 12
 ```
 
 ---
@@ -163,7 +179,7 @@ Density: ████████████████████ 0.62
 - Docker (for EigenDA proxy)
 - An Anthropic API key (or OpenAI / EigenAI)
 
-### Option A — Local processes (quickest for recording)
+### Option A — Local processes (quickest)
 
 ```bash
 git clone <repo>
@@ -181,15 +197,15 @@ cp .env.example .env
 # NASA_API_KEY=DEMO_KEY   (or your real key)
 ```
 
-Start the EigenDA proxy (simulated, no wallet needed):
+Start everything with one command:
 
 ```bash
-docker run -d --name eigenda-proxy -p 4242:4242 \
-  ghcr.io/layr-labs/eigenda-proxy:latest \
-  --memstore.enabled --addr=0.0.0.0 --port=4242
+npm run start:multi
 ```
 
-Start all three agents + dashboard:
+This launches the EigenDA proxy, all three agents, and the dashboard — with color-coded output for each process. Press `Ctrl+C` to stop everything cleanly.
+
+**Manual alternative** (four separate terminals):
 
 ```bash
 # Terminal 1 — Agent Kepler (Observer)
@@ -281,6 +297,9 @@ curl http://localhost:3000/api/attestations | jq .
 
 # Aggregated swarm state
 curl http://localhost:3000/api/state | jq .
+
+# Collective memories (one per phase transition)
+curl http://localhost:3001/collective | jq .
 ```
 
 The `/attestation` endpoint on each agent returns a verifiable proof containing the agent's public key, fingerprint, latest signed pheromone, and EigenDA commitment status.
@@ -294,7 +313,7 @@ The `/attestation` endpoint on each agent returns a verifiable proof containing 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SYNC_INTERVAL_MS` | `2000` | Time between agent steps |
-| `PHEROMONE_DECAY` | `0.12` | How fast pheromone strength fades |
+| `PHEROMONE_DECAY` | `0.12` | How fast pheromone strength fades per step |
 | `CRITICAL_DENSITY` | `0.55` | Density threshold for phase transition |
 | `TOKEN_BUDGET_PER_AGENT` | `50000` | Max tokens per agent before scan-only fallback |
 
@@ -304,9 +323,14 @@ The `/attestation` endpoint on each agent returns a verifiable proof containing 
 |----------|---------|-------------|
 | `LLM_PROVIDER` | `anthropic` | `anthropic`, `openai`, or `eigenai` |
 | `ANTHROPIC_API_KEY` | — | Anthropic API key |
-| `ANTHROPIC_MODEL` | `claude-sonnet-4-5` | Model to use |
+| `ANTHROPIC_BASE_URL` | — | Optional base URL override (proxies, etc.) |
+| `ANTHROPIC_MODEL` | `claude-opus-4-6` | Model to use |
 | `OPENAI_API_KEY` | — | OpenAI API key |
+| `OPENAI_API_URL` | `https://api.openai.com/v1` | OpenAI-compatible endpoint |
+| `OPENAI_MODEL` | `gpt-4o` | OpenAI model |
 | `EIGENAI_API_KEY` | — | EigenAI API key |
+| `EIGENAI_API_URL` | `https://api.eigenai.xyz/v1` | EigenAI endpoint |
+| `EIGENAI_MODEL` | `gpt-oss-120b-f16` | EigenAI model |
 
 ### NASA
 
@@ -333,9 +357,9 @@ The `/attestation` endpoint on each agent returns a verifiable proof containing 
 
 | Dataset | API | What Agents Study |
 |---------|-----|------------------|
-| Near-Earth Objects | NASA NeoWs | Asteroid/comet close approaches, velocities, diameters, hazard rates |
-| Solar Flares | NASA DONKI | X/M/C class flares, daily averages, peak events |
-| Earth Events | NASA EONET | Active wildfires, storms, volcanoes, sea ice — real-time |
+| Near-Earth Objects | NASA NeoWs | Asteroid/comet close approaches, velocities, diameters, hazard rates — 7-day rolling window |
+| Solar Flares | NASA DONKI | X/M/C class flares, daily averages, peak events — 30-day rolling window |
+| Earth Events | NASA EONET | Active wildfires, storms, volcanoes, sea ice — real-time open events |
 | Exoplanets | NASA Exoplanet Archive | Confirmed planets since 2022, super-Earths, hot Jupiters, habitable zone candidates |
 | Mars Weather | Curiosity REMS | Surface temperatures, pressure, dust storm season, mission sol count |
 
@@ -370,16 +394,21 @@ swarm-mind/
 │   ├── thinker.ts        # LLM reasoning — thoughts, analysis, collective reports
 │   ├── decider.ts        # Decision scoring and softmax selection
 │   ├── executor.ts       # Action handlers (analyze, share, correlate, explore)
-│   ├── eigenda.ts        # EigenDA Proxy client
-│   ├── swarm.ts          # Legacy single-process orchestrator (kept for reference)
-│   └── persistence.ts    # SQLite persistence
+│   ├── eigenda.ts        # EigenDA Proxy client (disperse, retrieve, fire-and-forget)
+│   ├── persistence.ts    # SQLite persistence
+│   └── swarm.ts          # Legacy single-process orchestrator (kept for reference)
 ├── dashboard/
 │   ├── index.html        # Real-time visualization (canvas, tabs, attestation panel)
-│   └── server-multi.ts   # Dashboard server — aggregates from all 3 agent HTTP APIs
+│   ├── server-multi.ts   # Dashboard server — aggregates from all 3 agent HTTP APIs
+│   └── server.ts         # Legacy single-agent dashboard server
+├── scripts/
+│   └── deploy.sh         # Deployment helper script
+├── start-local.sh        # One-command local launch (EigenDA proxy + 3 agents + dashboard)
 ├── Dockerfile            # Multi-stage build (builder + runtime)
 ├── docker-compose.yml    # eigenda-proxy + 3 agents + dashboard
-├── .env                  # Configuration (gitignored)
-├── .env.example          # Template
+├── thread.md             # Twitter/X thread content for the project
+├── .env.example          # Configuration template
+├── .env                  # Your configuration (gitignored)
 ├── package.json
 ├── tsconfig.json
 └── README.md
@@ -401,7 +430,7 @@ Live at `http://localhost:3000`:
 
 **Pheromones tab** — all active signals, color-coded by domain, decaying over time
 
-**Collective tab** — LLM-written narrative reports generated at phase transition: overview, key findings, opinions, what could be better, verdict
+**Collective tab** — LLM-written narrative reports generated at each phase transition: overview, key findings, opinions, what could be better, verdict
 
 **Report tab** — full swarm summary: datasets analyzed, top insights, per-agent summaries
 
@@ -444,6 +473,8 @@ The code handles both identically. `isEnabled()` in `eigenda.ts` checks if `EIGE
 6. **Budget-gated** — Each agent has a token budget. When exhausted, it falls back to lightweight scan-only mode. No runaway costs.
 
 7. **Gossip, not broadcast** — Agents push pheromones to peers on emit and pull from peers on each tick. No message bus. No shared queue. Pure HTTP gossip.
+
+8. **Continuous cycling** — After a phase transition the channel resets immediately (timestamped so stale pheromones are rejected), a lockout prevents instant re-transition, and the swarm resumes exploration toward its next collective insight.
 
 ---
 
