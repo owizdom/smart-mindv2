@@ -93,16 +93,16 @@ app.get("/api/state", async (_req, res) => {
   const synced           = validStates.filter(s => s.synchronized).length;
   const phaseTransition  = validStates.some(s => s.phaseTransitionOccurred);
   const criticalThreshold = (validStates[0]?.criticalThreshold as number) ?? 0.55;
+  // Use the density already computed inside each agent (averaged across all agents)
+  const density = validStates.reduce((s, a) => s + ((a.density as number) || 0), 0) / Math.max(1, validStates.length);
 
-  // Aggregate density from all agents
+  // Fetch pheromones just for metrics
   const allPheromones = (await fetchAllAgents("/pheromones")).flat();
   const seen = new Set<string>();
   const unique: unknown[] = [];
   for (const p of allPheromones as Array<{ id: string }>) {
     if (!seen.has(p.id)) { seen.add(p.id); unique.push(p); }
   }
-  const active = (unique as Array<{ strength: number }>).filter(p => p.strength > 0.1);
-  const density = Math.min(1, active.length / 24);
 
   res.json({
     step,

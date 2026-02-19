@@ -206,8 +206,9 @@ app.get("/state", (_, res) => {
     eigenDAEnabled: eigenDAEnabled(),
     peerCount:      PEER_URLS.length,
     llmReady,
-    density:            channel.density,
-    criticalThreshold:  channel.criticalThreshold,
+    density:                  channel.density,
+    criticalThreshold:        channel.criticalThreshold,
+    phaseTransitionOccurred:  channel.phaseTransitionOccurred,
   });
 });
 
