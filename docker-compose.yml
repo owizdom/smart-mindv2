@@ -106,9 +106,9 @@ services:
     environment:
       <<: *common-env
       AGENT_URLS:     "http://agent-kepler:3001,http://agent-hubble:3002,http://agent-voyager:3003"
-      DASHBOARD_PORT: "3000"
+      DASHBOARD_PORT: "3001"
     ports:
-      - "3000:3000"
+      - "3001:3001"
     depends_on:
       - agent-kepler
       - agent-hubble
