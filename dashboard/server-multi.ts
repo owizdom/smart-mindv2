@@ -11,8 +11,8 @@ import cors from "cors";
 import path from "path";
 import fs from "fs";
 
-const AGENT_URLS   = (process.env.AGENT_URLS || "http://localhost:3001,http://localhost:3002,http://localhost:3003").split(",").filter(Boolean);
-const DASHBOARD_PORT = parseInt(process.env.DASHBOARD_PORT || "3000");
+const AGENT_URLS   = (process.env.AGENT_URLS || "http://127.0.0.1:3002,http://127.0.0.1:3003,http://127.0.0.1:3004").split(",").filter(Boolean);
+const DASHBOARD_PORT = parseInt(process.env.DASHBOARD_PORT || "3001");
 
 const app = express();
 app.use(cors());
@@ -297,7 +297,7 @@ app.get(["/dashboard", "/dashboard/"], (_req, res) => {
   res.sendFile(dashboardIndex);
 });
 
-app.listen(DASHBOARD_PORT, () => {
+app.listen(DASHBOARD_PORT, "0.0.0.0", () => {
   console.log(`\n[DASHBOARD] http://localhost:${DASHBOARD_PORT}`);
   console.log(`[DASHBOARD] Aggregating from ${AGENT_URLS.length} independent agents:`);
   AGENT_URLS.forEach(u => console.log(`  → ${u}`));
