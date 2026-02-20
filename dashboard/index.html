@@ -42,6 +42,30 @@
 
     .app { display:grid; grid-template-rows:48px 1fr; height:100vh; }
 
+    @media (max-width: 1200px) {
+      .app { grid-template-rows:56px 1fr; }
+      .header { padding: 0 12px; gap: 10px; }
+      .header-stats { gap: 3px; flex-wrap: wrap; }
+      .body { grid-template-columns: 150px 1fr; }
+      .live-layout { grid-template-columns: 1fr 240px; }
+      .inject-input { width: 140px; }
+      .inject-wrap { padding-left: 10px; }
+    }
+
+    @media (max-width: 900px) {
+      .body { grid-template-columns: 1fr; }
+      .tabs { display: none; }
+      .live-layout { grid-template-columns: 1fr; }
+      .live-sidebar { display: none; }
+      .agents-grid,
+      .scroll-panel,
+      .report-layout,
+      .report-main,
+      .report-aside,
+      #collective-list,
+      #attestation-grid { padding: 10px; }
+    }
+
     /* ── Header ── */
     .header {
       background: var(--surface);
@@ -145,6 +169,21 @@
     .live-layout { display: grid; grid-template-columns: 1fr 280px; height: 100%; }
     .canvas-wrap { position: relative; overflow: hidden; background: var(--bg); }
     canvas { width: 100%; height: 100%; display: block; }
+    .webgl-fallback {
+      position: absolute;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255,255,255,0.9);
+      color: var(--text-2);
+      font-size: 11px;
+      text-align: center;
+      z-index: 4;
+      pointer-events: none;
+      padding: 16px;
+      line-height: 1.5;
+    }
 
     .density-wrap {
       position: absolute; bottom: 14px; left: 14px; right: 14px; z-index: 8;
@@ -493,6 +532,9 @@
         <div class="live-layout">
           <div class="canvas-wrap" id="canvas-wrap">
             <div id="three-mount" style="position:absolute;inset:0"></div>
+            <div id="webgl-fallback" class="webgl-fallback">
+              WebGL is unavailable. The live 3D scene is disabled, but live metrics and feed are still updating.
+            </div>
             <div id="bubble-layer" style="position:absolute;inset:0;pointer-events:none;overflow:hidden;z-index:5"></div>
             <div class="focus-panel" id="focus-panel">
               <button class="focus-close" onclick="closeFocus()">x</button>
@@ -593,7 +635,24 @@
 </div>
 
 <script>
-const API = window.location.origin;
+const API_BASE = (() => {
+  const path = window.location.pathname.replace(/\/$/, "");
+  if (!path || path === "/" || path === "/dashboard") return "";
+  if (path.endsWith("/dashboard")) return path.slice(0, -"/dashboard".length) || "";
+  return path;
+})();
+const API = window.location.origin + API_BASE;
+
+async function safeJson(url, fallback) {
+  try {
+    const r = await fetch(url, { cache: 'no-store' });
+    if (!r.ok) return fallback;
+    const raw = await r.text();
+    return raw ? JSON.parse(raw) : fallback;
+  } catch {
+    return fallback;
+  }
+}
 
 // ── State ──
 let agents = [], pheromones = [], thoughts = [];
@@ -626,6 +685,7 @@ const CAM_RADIUS = 520;
 let camDragging = false, camLastX = 0, camLastY = 0;
 let camThetaBase = 0, camPhiBase = 0, autoOrbitPaused = 0;
 let threeInitDone = false;
+let threeEnabled = true;
 
 // ── Neuron scatter system ──
 let liveDensity = 0, liveCriticalThreshold = 0.55;
@@ -634,6 +694,7 @@ const agentScatterPos = {};        // agentId → THREE.Vector3
 const sparks = [];                 // [{line, mat, life}] — arc tendrils
 
 function freshScatterPos(agentId) {
+  if (!threeEnabled) return null;
   const angle  = Math.random() * Math.PI * 2;
   const radius = 240 + Math.random() * 130;
   const h      = (Math.random() - 0.5) * 220;
@@ -657,6 +718,7 @@ function triggerScatterReset() {
 
 // Spark arc between two agents (neuron synapse effect)
 function spawnSpark(fromId, toId) {
+  if (!threeEnabled) return;
   if (!threeScene) return;
   const ga = agentMeshes[fromId], gb = agentMeshes[toId];
   if (!ga || !gb) return;
@@ -716,6 +778,7 @@ function switchTab(name) {
 
 // ── Three.js resize ──
 function resize() {
+  if (!threeEnabled) return;
   if (!threeRenderer || !threeCamera) return;
   const mount = document.getElementById('three-mount');
   if (!mount) return;
@@ -789,6 +852,7 @@ function addBubble(agentId, text) {
 
 // ── Spawn pheromone sparks near an agent (3D) ──
 function spawnPheromoneParticles(agentId) {
+  if (!threeEnabled) return;
   const g = agentMeshes[agentId];
   if (!g) return;
   for (let i = 0; i < 10; i++) {
@@ -806,6 +870,7 @@ function spawnPheromoneParticles(agentId) {
 
 // ── Phase burst (3D expanding wireframe sphere) ──
 function triggerBurst() {
+  if (!threeEnabled) return;
   if (burst3D) { threeScene.remove(burst3D.mesh); burst3D = null; }
   if (!threeScene) return;
   const mesh = new THREE.Mesh(
@@ -820,6 +885,23 @@ function triggerBurst() {
 function hexColor(str) { return parseInt((str || '#6366f1').replace('#', ''), 16); }
 
 function initThree() {
+  const fallback = document.getElementById('webgl-fallback');
+  if (typeof THREE === 'undefined') {
+    threeEnabled = false;
+    if (fallback) fallback.style.display = 'flex';
+    return false;
+  }
+  const hasContext = (() => {
+    const testCanvas = document.createElement('canvas');
+    return !!(testCanvas.getContext('webgl') || testCanvas.getContext('experimental-webgl'));
+  })();
+  if (!hasContext) {
+    threeEnabled = false;
+    if (fallback) fallback.style.display = 'flex';
+    return false;
+  }
+  if (fallback) fallback.style.display = 'none';
+
   const mount = document.getElementById('three-mount');
   const w = mount.clientWidth || 800, h = mount.clientHeight || 600;
 
@@ -901,6 +983,7 @@ function initThree() {
     cameraPhi   = Math.max(0.08, Math.min(1.45, tPB + dy * Math.PI * 1.2));
     updateCameraPos(); autoOrbitPaused = Date.now();
   }, { passive: false });
+  return true;
 }
 
 function updateCameraPos() {
@@ -922,6 +1005,7 @@ function agentTo3D(a) {
 }
 
 function updateAgentMeshes3D() {
+  if (!threeEnabled || !threeScene) return;
   const now = Date.now() / 1000;
   for (let ai = 0; ai < agents.length; ai++) {
     const a = agents[ai];
@@ -1015,6 +1099,7 @@ function updateAgentMeshes3D() {
 }
 
 function updateConnections3D() {
+  if (!threeEnabled || !threeScene) return;
   for (let i = 0; i < agents.length; i++) {
     for (let j = i + 1; j < agents.length; j++) {
       const key = `${i}-${j}`;
@@ -1082,6 +1167,7 @@ function updateConnections3D() {
 }
 
 function updatePheromoneCloud() {
+  if (!threeEnabled || !pheromoneGeo || !pheromonePoints) return;
   for (const p of pParticles) {
     p.x += p.vx; p.y += p.vy; p.z += p.vz;
     p.vx *= 0.98; p.vy *= 0.98; p.vz *= 0.98;
@@ -1101,6 +1187,7 @@ function updatePheromoneCloud() {
 }
 
 function updateBurst3D() {
+  if (!threeEnabled) return;
   if (!burst3D) return;
   burst3D.r += 5;
   const alpha = Math.max(0, 1 - burst3D.r / 600);
@@ -1117,7 +1204,7 @@ function updateBurst3D() {
 
 // CSS bubble overlay — positioned by projecting 3D agent sphere to screen
 function updateBubbles3D() {
-  if (!threeCamera || !threeRenderer) return;
+  if (!threeEnabled || !threeCamera || !threeRenderer) return;
   const now = Date.now();
   bubbles = bubbles.filter(b => now - b.born < BUBBLE_DUR);
   const layer = document.getElementById('bubble-layer');
@@ -1144,6 +1231,7 @@ function updateBubbles3D() {
 const _ray = new THREE.Raycaster();
 const _mv  = new THREE.Vector2();
 function handleThreeClick(event) {
+  if (!threeEnabled) return;
   if (!threeCamera || !threeRenderer) return;
   const rect = threeRenderer.domElement.getBoundingClientRect();
   _mv.x =  ((event.clientX - rect.left) / rect.width)  * 2 - 1;
@@ -1173,13 +1261,19 @@ function updateAgentInterp() {
 // ── 60fps render loop ──
 let transitioned = false;
 let animRunning = false;
-let lastPheromoneCount = 0;
+let lastKnownPheromones = new Set();
 
 function animate() {
   requestAnimationFrame(animate);
   if (!document.getElementById('panel-live').classList.contains('active')) return;
 
-  if (!threeInitDone) { initThree(); threeInitDone = true; }
+  if (!threeInitDone) {
+    const inited = initThree();
+    threeEnabled = inited !== false;
+    threeInitDone = true;
+    if (!threeEnabled) return;
+  }
+  if (!threeEnabled) return;
 
   // Auto-orbit (pauses 3s after manual drag)
   if (!camDragging && Date.now() - autoOrbitPaused > 3000) {
@@ -1253,8 +1347,8 @@ function renderMemory(m) {
 // ── Report ──
 async function fetchReport() {
   try {
-    const r = await fetch(API+'/api/report').then(r=>r.json());
-    renderReport(r);
+    const r = await safeJson(API+'/api/report', null);
+    if (r) renderReport(r);
   } catch {}
 }
 
@@ -1328,41 +1422,52 @@ function renderReport(report) {
 // ── Main data refresh (600ms) ──
 async function refresh() {
   try {
-    const [stateRes, agentsRes, pheroRes, collectRes, thoughtsRes] = await Promise.all([
-      fetch(API+'/api/state').then(r=>r.json()),
-      fetch(API+'/api/agents').then(r=>r.json()),
-      fetch(API+'/api/pheromones').then(r=>r.json()),
-      fetch(API+'/api/collective').then(r=>r.json()),
-      fetch(API+'/api/thoughts').then(r=>r.json()).catch(()=>[]),
+    const [
+      stateRes,
+      agentsRes,
+      pheroRes,
+      collectRes,
+      thoughtsRes
+    ] = await Promise.all([
+      safeJson(API+'/api/state', {}),
+      safeJson(API+'/api/agents', []),
+      safeJson(API+'/api/pheromones', []),
+      safeJson(API+'/api/collective', []),
+      safeJson(API+'/api/thoughts', []),
     ]);
 
+    const safeAgents = Array.isArray(agentsRes) ? agentsRes : [];
+    const safePheros = Array.isArray(pheroRes) ? pheroRes : [];
+    const safeCollective = Array.isArray(collectRes) ? collectRes : [];
+    const safeThoughts = Array.isArray(thoughtsRes) ? thoughtsRes : [];
+
     // Detect new pheromones — spawn 3D particle burst + arc tendrils
-    if (pheroRes.length > lastPheromoneCount) {
-      const newOnes = pheroRes.slice(0, pheroRes.length - lastPheromoneCount);
-      for (const p of newOnes) {
+    const newPheromones = safePheros.filter((p) => p?.id && !lastKnownPheromones.has(p.id));
+    if (newPheromones.length > 0) {
+      for (const p of newPheromones) {
         spawnPheromoneParticles(p.agentId);
         // Arc tendril toward each other agent (neuron synapse)
-        if (threeInitDone && Math.random() < 0.55) {
-          for (const a of agentsRes) {
+        if (threeEnabled && Math.random() < 0.55) {
+          for (const a of safeAgents) {
             if (a.id !== p.agentId) spawnSpark(p.agentId, a.id);
           }
         }
       }
     }
-    lastPheromoneCount = pheroRes.length;
+    lastKnownPheromones = new Set(safePheros.map((p) => p.id).filter(Boolean));
 
     // Record interpolation from current smooth position → new server position
-    for (const a of agentsRes) {
+    for (const a of safeAgents) {
       const cur = agentSmooth[a.id] || a.position;
       agentInterp[a.id] = { x0: cur.x, y0: cur.y, x1: a.position.x, y1: a.position.y, t0: Date.now(), dur: 680 };
     }
 
-    agents = agentsRes;
-    pheromones = pheroRes;
+    agents = safeAgents;
+    pheromones = safePheros;
     transitioned = stateRes.phaseTransitionOccurred;
 
     // New thoughts → bubbles
-    for (const t of thoughtsRes) {
+    for (const t of safeThoughts) {
       if (!prevThoughtIds.has(t.id) && t.conclusion) {
         addBubble(t.agentId, t.conclusion);
         prevThoughtIds.add(t.id);
@@ -1371,12 +1476,13 @@ async function refresh() {
     if (prevThoughtIds.size > 300) prevThoughtIds = new Set([...prevThoughtIds].slice(-150));
 
     // Header
-    document.getElementById('h-step').textContent = stateRes.step;
-    document.getElementById('h-phero').textContent = stateRes.metrics.totalPheromones;
-    document.getElementById('h-disc').textContent = stateRes.metrics.totalDiscoveries;
-    document.getElementById('h-synced').textContent = `${stateRes.metrics.synchronizedCount}/${agentsRes.length}`;
-    document.getElementById('h-tokens').textContent = fmtTokens(stateRes.totalTokens||0);
-    document.getElementById('h-density').textContent = (stateRes.density||0).toFixed(3);
+    const metrics = stateRes.metrics || {};
+    document.getElementById('h-step').textContent = stateRes.step || 0;
+    document.getElementById('h-phero').textContent = metrics.totalPheromones || 0;
+    document.getElementById('h-disc').textContent = metrics.totalDiscoveries || 0;
+    document.getElementById('h-synced').textContent = `${metrics.synchronizedCount || 0}/${safeAgents.length || 0}`;
+    document.getElementById('h-tokens').textContent = fmtTokens(stateRes.totalTokens || metrics.totalTokens || 0);
+    document.getElementById('h-density').textContent = ((stateRes.density || metrics.density || 0).toFixed ? (stateRes.density || metrics.density || 0).toFixed(3) : '0.000');
 
 
     // Live density for scatter blend
@@ -1399,18 +1505,18 @@ async function refresh() {
       // Auto-switch to Collective tab — delay so report has time to generate
       setTimeout(() => {
         switchTab('collective');
-        fetch('/api/collective').then(r=>r.json()).then(data => {
+        safeJson(API+'/api/collective', []).then(data => {
           document.getElementById('collective-list').innerHTML = data.length > 0
             ? data.slice(-10).reverse().map(renderMemory).join('')
             : '<div class="empty"><div class="empty-icon">·</div>No collective memories yet</div>';
-        }).catch(()=>{});
+        });
       }, 3500);
     }
     prevTransition = stateRes.phaseTransitionOccurred;
 
     // Density bar
-    const density = stateRes.density||0;
-    const threshold = stateRes.criticalThreshold||0.35;
+    const density = stateRes.density || metrics.density || 0;
+    const threshold = stateRes.criticalThreshold || metrics.criticalThreshold || 0.35;
     const fill = document.getElementById('density-fill');
     fill.style.width = `${Math.min(density*100,100)}%`;
     fill.style.background = density >= threshold
@@ -1421,7 +1527,7 @@ async function refresh() {
     document.getElementById('density-marker').style.left = `${threshold*100}%`;
 
     // Agent list
-    document.getElementById('agent-list').innerHTML = agentsRes.map(a => {
+    document.getElementById('agent-list').innerHTML = safeAgents.map(a => {
       const color = getColor(a.id);
       const action = (a.currentAction||'idle').length>24 ? a.currentAction.slice(0,24)+'..' : a.currentAction||'idle';
       return `<div class="agent-row ${a.synchronized?'synced':''} ${a.id===focusedAgentId?'focused':''}" onclick="openFocus('${a.id}')">
@@ -1434,17 +1540,17 @@ async function refresh() {
     }).join('');
 
     // Live feed — only repaint when the top-5 items actually change
-    const items = thoughtsRes.length > 0 ? thoughtsRes : pheroRes.sort((a,b)=>b.timestamp-a.timestamp);
+    const items = safeThoughts.length > 0 ? safeThoughts : safePheros.sort((a,b)=>b.timestamp-a.timestamp);
     if (items.length > 0) {
       const feedKey = items.slice(0,5).map(t => (t.id||'') + '|' + (t.timestamp||'')).join(',');
       if (feedKey !== lastFeedKey) {
         lastFeedKey = feedKey;
         document.getElementById('thought-feed').innerHTML = items.slice(0,5).map(t => {
-          const ag = agentsRes.find(a=>a.id===t.agentId);
-          const color = getColor(t.agentId);
-          const text = t.conclusion || t.content || '';
-          return `<div class="thought-card">
-            <div class="thought-meta">
+            const ag = safeAgents.find(a=>a.id===t.agentId);
+            const color = getColor(t.agentId);
+            const text = t.conclusion || t.content || '';
+            return `<div class="thought-card">
+              <div class="thought-meta">
               <span class="thought-who" style="color:${color}">${ag?.name||'?'}</span>
               ${t.confidence!=null?`<span class="conf-badge">${Math.round(t.confidence*100)}%</span>`:''}
             </div>
@@ -1455,7 +1561,7 @@ async function refresh() {
     }
 
     // Agents grid
-    document.getElementById('agents-grid').innerHTML = agentsRes.map(a=>{
+    document.getElementById('agents-grid').innerHTML = safeAgents.map(a=>{
       const color = getColor(a.id);
       const tokenPct = Math.min((a.tokensUsed||0)/(a.tokenBudget||1)*100,100).toFixed(0);
       return `<div class="agent-card" onclick="switchTab('live');setTimeout(()=>openFocus('${a.id}'),50)">
@@ -1478,13 +1584,13 @@ async function refresh() {
     }).join('');
 
     // Pheromones
-    document.getElementById('pheromone-list').innerHTML = pheroRes.length > 0
-      ? pheroRes.sort((a,b)=>b.timestamp-a.timestamp).slice(0,60).map(p=>{
-          const ag = agentsRes.find(a=>a.id===p.agentId);
-          const color = p.agentId==='human' ? '#f43f5e' : getColor(p.agentId);
-          return `<div class="pheromone-row ${p.agentId==='human'?'human':''}">
-            <div class="p-dot" style="background:${color}"></div>
-            <div>
+    document.getElementById('pheromone-list').innerHTML = safePheros.length > 0
+      ? safePheros.sort((a,b)=>b.timestamp-a.timestamp).slice(0,60).map(p=>{
+            const ag = safeAgents.find(a=>a.id===p.agentId);
+            const color = p.agentId==='human' ? '#f43f5e' : getColor(p.agentId);
+            return `<div class="pheromone-row ${p.agentId==='human'?'human':''}">
+              <div class="p-dot" style="background:${color}"></div>
+              <div>
               <div class="p-content">${(p.content||'').slice(0,140)}</div>
               <div class="p-meta">${p.agentId==='human'?'You':ag?.name||'?'} · ${p.domain||''} · ${timeSince(p.timestamp)}</div>
             </div>
@@ -1494,8 +1600,8 @@ async function refresh() {
       : '<div class="empty"><div class="empty-icon">·</div>No signals yet</div>';
 
     // Collective
-    document.getElementById('collective-list').innerHTML = collectRes.length > 0
-      ? collectRes.slice(-10).reverse().map(renderMemory).join('')
+    document.getElementById('collective-list').innerHTML = safeCollective.length > 0
+      ? safeCollective.slice(-10).reverse().map(renderMemory).join('')
       : '<div class="empty"><div class="empty-icon">·</div>Waiting for phase transition...</div>';
 
     if (focusedAgentId) renderFocusPanel();
@@ -1509,8 +1615,8 @@ async function refresh() {
 async function fetchAttestation() {
   try {
     const [proofs, state] = await Promise.all([
-      fetch(API+'/api/attestations').then(r=>r.json()),
-      fetch(API+'/api/state').then(r=>r.json()),
+      safeJson(API+'/api/attestations', []),
+      safeJson(API+'/api/state', {}),
     ]);
 
     // EigenDA status
@@ -1525,10 +1631,11 @@ async function fetchAttestation() {
       ? `${da.attestedPheromones||0} pheromones anchored to EigenDA · KZG commitments verifiable by anyone`
       : 'Set EIGENDA_PROXY_URL and run the proxy to enable real KZG attestation';
 
+    const proofList = Array.isArray(proofs) ? proofs : [];
     // Per-agent attestation cards
     const grid = document.getElementById('attestation-grid');
-    if (proofs && proofs.length > 0) {
-      grid.innerHTML = proofs.filter(Boolean).map(proof => {
+    if (proofList.length > 0) {
+      grid.innerHTML = proofList.filter(Boolean).map(proof => {
         const color = getColor(proof.agent?.id || '');
         const tee = proof.compute?.teeMode;
         const latest = proof.latestPheromone;
@@ -1561,7 +1668,7 @@ async function fetchAttestation() {
     }
 
     // Verified pheromones
-    const pheroRes = await fetch(API+'/api/pheromones').then(r=>r.json());
+    const pheroRes = await safeJson(API+'/api/pheromones', []);
     const verifiedList = document.getElementById('verified-pheromones');
     const withSig = pheroRes.filter(p => p.attestation?.startsWith('ed25519:'));
     if (withSig.length > 0) {

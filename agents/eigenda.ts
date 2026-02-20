@@ -23,6 +23,14 @@
 const PROXY = process.env.EIGENDA_PROXY_URL;
 const TIMEOUT_MS = 30_000;
 
+function parseBoolean(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined) return fallback;
+  const v = value.trim().toLowerCase();
+  return ["1", "true", "yes", "on", "enabled"].includes(v);
+}
+
+const EIGENDA_ENABLED = parseBoolean(process.env.EIGENDA_ENABLED, false) && !!PROXY;
+
 export interface DAResult {
   commitment: string;   // hex-encoded KZG commitment from EigenDA
   size: number;         // blob bytes dispersed
@@ -30,7 +38,7 @@ export interface DAResult {
 }
 
 export function isEnabled(): boolean {
-  return !!PROXY;
+  return EIGENDA_ENABLED;
 }
 
 /**
@@ -39,7 +47,7 @@ export function isEnabled(): boolean {
  * in Pheromone.attestation — it is signed by restaked ETH operators.
  */
 export async function disperseBlob(payload: unknown): Promise<DAResult> {
-  if (!PROXY) throw new Error("EIGENDA_PROXY_URL not set");
+  if (!EIGENDA_ENABLED) throw new Error("EigenDA disabled or proxy not configured");
 
   const body = Buffer.from(JSON.stringify(payload), "utf-8");
 
@@ -87,7 +95,7 @@ export function disperseAsync(
   onSuccess: (result: DAResult) => void,
   label = "blob"
 ): void {
-  if (!PROXY) return;
+  if (!EIGENDA_ENABLED) return;
 
   disperseBlob(payload)
     .then((result) => {

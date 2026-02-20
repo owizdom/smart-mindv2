@@ -5,5 +5,4 @@ dist
 .env
 .git
 workspace
-scripts
 README.md

@@ -287,8 +287,14 @@ app.post("/api/inject", async (req, res) => {
   res.json({ ok: true });
 });
 
+const dashboardIndex = path.join(dashboardDir, "index.html");
+
 app.get("/", (_req, res) => {
-  res.sendFile(path.join(dashboardDir, "index.html"));
+  res.sendFile(dashboardIndex);
+});
+
+app.get(["/dashboard", "/dashboard/"], (_req, res) => {
+  res.sendFile(dashboardIndex);
 });
 
 app.listen(DASHBOARD_PORT, () => {

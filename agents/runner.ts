@@ -197,6 +197,177 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+let dashboardDir = path.join(process.cwd(), "dashboard");
+if (!fs.existsSync(path.join(dashboardDir, "index.html"))) {
+  dashboardDir = path.join(process.cwd(), "..", "dashboard");
+  if (!fs.existsSync(path.join(dashboardDir, "index.html"))) {
+    dashboardDir = path.join(__dirname, "..", "..", "dashboard");
+  }
+}
+app.use(express.static(dashboardDir));
+
+const buildAttestationPayload = () => {
+  const latest = agent.state.knowledge.slice(-1)[0] || agent.state.thoughts.slice(-1)[0];
+  return {
+    agent: {
+      id:          agent.state.id,
+      name:        agent.state.name,
+      publicKey:   agent.state.identity.publicKey,
+      fingerprint: agent.state.identity.fingerprint,
+    },
+    compute: {
+      eigenCompute: process.env.EIGENCOMPUTE_INSTANCE_ID || "local",
+      teeMode:      !!process.env.EIGENCOMPUTE_INSTANCE_ID,
+      instanceType: process.env.EIGENCOMPUTE_INSTANCE_TYPE || "local",
+    },
+    dataAvailability: {
+      eigenDAEnabled: eigenDAEnabled(),
+      proxyUrl:       process.env.EIGENDA_PROXY_URL || null,
+    },
+    latestPheromone: latest ? {
+      id:          latest.id,
+      domain:      latest.domain,
+      content:     latest.content.slice(0, 200),
+      attestation: latest.attestation,
+      eigenda:     latest.eigendaCommitment || null,
+      verified:    latest.agentPubkey
+        ? verifyAttestation(latest.attestation, latest.content, latest.agentId, latest.timestamp).valid
+        : latest.attestation?.startsWith("ed25519:"),
+    } : null,
+    stats: {
+      discoveriesTotal:    agent.state.discoveries,
+      pheromonesInChannel: channel.pheromones.length,
+      thoughtsFormed:      agent.state.thoughts.length,
+      tokensUsed:          agent.state.tokensUsed,
+      synchronized:        agent.state.synchronized,
+    },
+    timestamp: Date.now(),
+  };
+};
+
+const dashboardIndex = path.join(dashboardDir, "index.html");
+app.get("/", (_req, res) => res.sendFile(dashboardIndex));
+app.get(["/dashboard", "/dashboard/"], (_req, res) => res.sendFile(dashboardIndex));
+
+app.get("/api/state", (_req, res) => {
+  res.json({
+    step,
+    startedAt: Date.now(),
+    totalPRs: 0,
+    totalTokens: agent.state.tokensUsed,
+    transitionStep: null,
+    phaseTransitionOccurred: channel.phaseTransitionOccurred,
+    metrics: {
+      totalPheromones: channel.pheromones.length,
+      totalDiscoveries: agent.state.discoveries,
+      totalSyncs: agent.state.synchronized ? 1 : 0,
+      avgEnergy: agent.state.energy,
+      density: channel.density,
+      synchronizedCount: agent.state.synchronized ? 1 : 0,
+      collectiveMemoryCount: collectiveMemories.length,
+      uniqueDomainsExplored: new Set(channel.pheromones.map((p) => p.domain)).size,
+    },
+    eigenDA: {
+      enabled: eigenDAEnabled(),
+      attestedPheromones: channel.pheromones.filter((p) => p.eigendaCommitment).length,
+      attestedCollectiveMemories: collectiveMemories.filter((m) => !!m.attestation).length,
+    },
+  });
+});
+
+app.get("/api/agents", (_req, res) => {
+  res.json([
+    {
+      id: agent.state.id,
+      name: agent.state.name,
+      position: agent.state.position,
+      velocity: agent.state.velocity,
+      energy: agent.state.energy,
+      synchronized: agent.state.synchronized,
+      explorationTarget: agent.state.explorationTarget,
+      discoveries: agent.state.discoveries,
+      absorbed: agent.state.absorbed.size,
+      knowledgeCount: agent.state.knowledge.length,
+      contributionsToCollective: agent.state.contributionsToCollective,
+      stepCount: agent.state.stepCount,
+      currentAction: agent.state.currentAction || "idle",
+      specialization: agent.state.specialization,
+      thoughtCount: agent.state.thoughts.length,
+      decisionCount: agent.state.decisions.length,
+      prsCreated: agent.state.prsCreated.length,
+      tokensUsed: agent.state.tokensUsed,
+      tokenBudget: agent.state.tokenBudget,
+      latestThought: agent.state.thoughts.length > 0 ? agent.state.thoughts[agent.state.thoughts.length - 1]?.conclusion : null,
+      phaseTransitionOccurred: channel.phaseTransitionOccurred,
+      transitionStep: null,
+      criticalThreshold: channel.criticalThreshold,
+      density: channel.density,
+    },
+  ]);
+});
+
+app.get("/api/thoughts", (_req, res) => {
+  res.json(agent.state.thoughts.slice(-50).reverse());
+});
+
+app.get("/api/decisions", (_req, res) => {
+  res.json(agent.state.decisions.slice(-50).reverse());
+});
+
+app.get("/api/repos", (_req, res) => {
+  const seen = new Set<string>();
+  const datasets: Array<{ topic: string; timeRange: string; studiedBy: string[] }> = [];
+  for (const entry of agent.state.reposStudied) {
+    const [topic, ...rest] = entry.split(":");
+    const label = topic.replace(/_/g, " ");
+    if (!seen.has(entry)) {
+      seen.add(entry);
+      datasets.push({ topic: label, timeRange: rest.join(":") || "recent", studiedBy: [agent.state.name] });
+    }
+  }
+  res.json(datasets);
+});
+
+app.get("/api/attestations", (_req, res) => {
+  res.json([buildAttestationPayload()]);
+});
+
+app.get("/api/identities", (_req, res) => {
+  res.json([agent.state.identity]);
+});
+
+app.get("/api/report", (_req, res) => {
+  res.json({
+    generatedAt: Date.now(),
+    swarmStep: step,
+    agentSummaries: [
+      {
+        name: agent.state.name,
+        specialization: agent.state.specialization,
+        thoughtCount: agent.state.thoughts.length,
+        topConclusions: agent.state.thoughts
+          .filter((t) => t.confidence > 0.5)
+          .slice(0, 5)
+          .map((t) => ({ conclusion: t.conclusion, confidence: t.confidence })),
+      },
+    ],
+    topInsights: agent.state.thoughts
+      .slice(-10)
+      .filter((t) => t.confidence > 0.5)
+      .reverse()
+      .map((t) => ({ agentName: agent.state.name, trigger: t.trigger, confidence: t.confidence, conclusion: t.conclusion, reasoning: t.reasoning, suggestedActions: t.suggestedActions })),
+    reposStudied: agent.state.reposStudied.map((entry) => {
+      const [topic, ...rest] = entry.split(":");
+      return {
+        topic: topic.replace(/_/g, " "),
+        timeRange: rest.join(":") || "recent",
+        studiedBy: [agent.state.name],
+      };
+    }),
+    collectiveMemories,
+  });
+});
+
 app.get("/state", (_, res) => {
   const thoughts = agent.state.thoughts;
   res.json({

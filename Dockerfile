@@ -22,7 +22,10 @@ COPY --from=builder /app/dist         ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 COPY dashboard/index.html             ./dashboard/index.html
+COPY scripts/run-eigencloud-multi.sh  ./scripts/run-eigencloud-multi.sh
+
+RUN chmod +x ./scripts/run-eigencloud-multi.sh
 
 VOLUME ["/data"]
 EXPOSE 3001
-CMD ["node", "dist/agents/runner.js"]
+CMD ["./scripts/run-eigencloud-multi.sh"]

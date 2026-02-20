@@ -32,9 +32,50 @@ export function startDashboard(
   }
   app.use(express.static(dashboardDir));
 
+  const buildAttestationPayload = (agent: SwarmAgent) => {
+    const latest = agent.state.knowledge.slice(-1)[0];
+    return {
+      agent: {
+        id: agent.state.id,
+        name: agent.state.name,
+        publicKey: agent.state.identity.publicKey,
+        fingerprint: agent.state.identity.fingerprint,
+      },
+      compute: {
+        eigenCompute: process.env.EIGENCOMPUTE_INSTANCE_ID || "local",
+        teeMode: !!process.env.EIGENCOMPUTE_INSTANCE_ID,
+        instanceType: process.env.EIGENCOMPUTE_INSTANCE_TYPE || "local",
+      },
+      dataAvailability: {
+        eigenDAEnabled: eigenDAEnabled(),
+        proxyUrl: process.env.EIGENDA_PROXY_URL || null,
+      },
+      latestPheromone: latest
+        ? {
+            id: latest.id,
+            domain: latest.domain,
+            content: latest.content.slice(0, 200),
+            attestation: latest.attestation,
+            eigenda: latest.eigendaCommitment || null,
+            verified: latest.attestation?.startsWith("ed25519:") || false,
+          }
+        : null,
+      stats: {
+        discoveriesTotal: agent.state.discoveries,
+        pheromonesInChannel: state.channel.pheromones.length,
+        thoughtsFormed: agent.state.thoughts.length,
+        tokensUsed: agent.state.tokensUsed,
+        synchronized: agent.state.synchronized,
+      },
+      timestamp: Date.now(),
+    };
+  };
+
   app.get("/api/state", (_req, res) => {
     const totalPRs = agents.reduce((s, a) => s + a.state.prsCreated.length, 0);
     const totalTokens = agents.reduce((s, a) => s + a.state.tokensUsed, 0);
+    const attestedPheromones = getRecentPheromones(100).filter((p) => p.eigendaCommitment);
+    const attestedMemories = getCollectiveMemories().filter((m) => m.eigendaCommitment);
     res.json({
       step: state.step,
       startedAt: state.startedAt,
@@ -45,6 +86,11 @@ export function startDashboard(
       criticalThreshold: state.channel.criticalThreshold,
       totalPRs,
       totalTokens,
+      eigenDA: {
+        enabled: eigenDAEnabled(),
+        attestedPheromones: attestedPheromones.length,
+        attestedCollectiveMemories: attestedMemories.length,
+      },
     });
   });
 
@@ -76,6 +122,10 @@ export function startDashboard(
           : null,
       }))
     );
+  });
+
+  app.get("/api/attestations", (_req, res) => {
+    res.json(agents.map(buildAttestationPayload));
   });
 
   app.get("/api/pheromones", (_req, res) => {
@@ -297,8 +347,14 @@ export function startDashboard(
     res.json({ ok: true, pheromone });
   });
 
+  const dashboardIndex = path.join(dashboardDir, "index.html");
+
   app.get("/", (_req, res) => {
-    res.sendFile(path.join(dashboardDir, "index.html"));
+    res.sendFile(dashboardIndex);
+  });
+
+  app.get(["/dashboard", "/dashboard/"], (_req, res) => {
+    res.sendFile(dashboardIndex);
   });
 
   app.listen(port, () => {
