@@ -15,6 +15,41 @@ let activeProvider: LLMConfig["provider"] = "eigenai";
 let modelName = "gpt-oss-120b-f16";
 let totalTokensTracked = 0;
 
+// ── Rate limiter (shared across all agents in this process) ──
+const DAILY_LIMIT  = parseInt(process.env.LLM_DAILY_LIMIT  || "14000"); // buffer under 14,400
+const MINUTE_LIMIT = parseInt(process.env.LLM_MINUTE_LIMIT || "25");    // buffer under 30/min
+
+let dailyCount  = 0;
+let dailyReset  = Date.now() + 86_400_000;   // reset 24h from start
+const minuteWindow: number[] = [];            // timestamps of calls in the last 60s
+
+function isRateLimited(): boolean {
+  const now = Date.now();
+
+  // Reset daily counter if 24h has passed
+  if (now > dailyReset) {
+    dailyCount = 0;
+    dailyReset = now + 86_400_000;
+  }
+
+  // Evict timestamps older than 60s from the sliding window
+  while (minuteWindow.length && minuteWindow[0] < now - 60_000) minuteWindow.shift();
+
+  if (dailyCount >= DAILY_LIMIT) {
+    console.warn(`  [LLM] Daily limit reached (${DAILY_LIMIT}). Skipping.`);
+    return true;
+  }
+  if (minuteWindow.length >= MINUTE_LIMIT) {
+    // Don't log every time — too noisy
+    return true;
+  }
+
+  // Record this call
+  minuteWindow.push(now);
+  dailyCount++;
+  return false;
+}
+
 export function initThinker(config: LLMConfig): void {
   activeProvider = config.provider;
   modelName = config.model;
@@ -35,12 +70,19 @@ export function getTotalTokensUsed(): number {
   return totalTokensTracked;
 }
 
+export function getLLMUsage(): { dailyCount: number; dailyLimit: number; minuteCount: number; minuteLimit: number } {
+  const now = Date.now();
+  const recentMinute = minuteWindow.filter(t => t >= now - 60_000).length;
+  return { dailyCount, dailyLimit: DAILY_LIMIT, minuteCount: recentMinute, minuteLimit: MINUTE_LIMIT };
+}
+
 // ── Internal LLM call ──
 
 interface CallOptions {
   maxTokens?: number;
   temperature?: number;
   jsonMode?: boolean;
+  force?: boolean;  // bypass per-process rate limiter (for rare synthesis calls)
 }
 
 async function callLLM(
@@ -48,6 +90,15 @@ async function callLLM(
   userPrompt: string,
   options: CallOptions = {}
 ): Promise<{ content: string; tokensUsed: number }> {
+  if (!options.force && isRateLimited()) return { content: "", tokensUsed: 0 };
+  // Forced calls still track toward limits
+  if (options.force) {
+    const now = Date.now();
+    while (minuteWindow.length && minuteWindow[0] < now - 60_000) minuteWindow.shift();
+    minuteWindow.push(now);
+    dailyCount++;
+  }
+
   const maxTokens = options.maxTokens || 1000;
   const temperature = options.temperature ?? 0.7;
 
@@ -105,7 +156,9 @@ async function callAnthropic(
         console.error(`  [LLM] Failed after ${maxRetries + 1} attempts: ${message.slice(0, 200)}`);
         return { content: "", tokensUsed: 0 };
       }
-      await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+      const message = err instanceof Error ? err.message : String(err);
+      const is429 = message.includes("429") || message.toLowerCase().includes("rate limit");
+      await new Promise((r) => setTimeout(r, is429 ? 8000 * (attempt + 1) : 1000 * (attempt + 1)));
     }
   }
 
@@ -148,7 +201,9 @@ async function callOpenAI(
         console.error(`  [LLM] Failed after ${maxRetries + 1} attempts: ${message.slice(0, 200)}`);
         return { content: "", tokensUsed: 0 };
       }
-      await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+      const message = err instanceof Error ? err.message : String(err);
+      const is429 = message.includes("429") || message.toLowerCase().includes("rate limit");
+      await new Promise((r) => setTimeout(r, is429 ? 8000 * (attempt + 1) : 1000 * (attempt + 1)));
     }
   }
 
@@ -173,15 +228,7 @@ function buildSystemPrompt(agent: AutonomousAgentState): string {
   if (p.sociability > 0.7) traits.push("collaborative, eager to share findings with the swarm");
   else if (p.sociability < 0.3) traits.push("independent, does deep analysis before sharing");
 
-  return `You are ${agent.name}, an autonomous scientific research agent in a NASA swarm collective.
-Your specialization: ${agent.specialization}.
-Your personality: ${traits.join("; ") || "balanced scientific approach"}.
-
-You analyze real NASA datasets, form scientific hypotheses, and share findings with the swarm.
-You have analyzed ${agent.reposStudied.length} datasets so far.
-Current token budget remaining: ${agent.tokenBudget - agent.tokensUsed}.
-
-Be specific — reference actual numbers from the data. Form real scientific opinions.`;
+  return `You are ${agent.name}, a NASA swarm agent. Specialization: ${agent.specialization}. Traits: ${traits.join("; ") || "balanced"}. Datasets analyzed: ${agent.reposStudied.length}. Be specific with numbers. Form bold scientific opinions.`;
 }
 
 // ── Core Reasoning Functions ──
@@ -193,22 +240,14 @@ export async function formThought(
   context: string
 ): Promise<{ thought: AgentThought; tokensUsed: number }> {
   const systemPrompt = buildSystemPrompt(agentState);
-  const userPrompt = `You observed something. Form a structured engineering thought.
+  const userPrompt = `Trigger: ${trigger.slice(0, 80)}
+Observation: ${observation.slice(0, 120)}
+Context: ${context.slice(0, 100)}
 
-Trigger: ${trigger}
-Observation: ${observation}
-Context: ${context}
-
-Respond as JSON:
-{
-  "reasoning": "your chain of thought (2-3 sentences)",
-  "conclusion": "key takeaway (1 sentence)",
-  "suggestedActions": ["action1", "action2"],
-  "confidence": 0.0-1.0
-}`;
+JSON:{"reasoning":"2 sentences","conclusion":"1 sentence","suggestedActions":["action:topic"],"confidence":0.0-1.0}`;
 
   const { content, tokensUsed } = await callLLM(systemPrompt, userPrompt, {
-    maxTokens: 800,
+    maxTokens: 380,
     jsonMode: true,
   });
 
@@ -249,34 +288,16 @@ export async function analyzeDataset(
     .map(([k, v]) => `  ${k}: ${v}`)
     .join("\n");
 
-  const userPrompt = `Analyze this real NASA dataset and form scientific findings.
+  const userPrompt = `NASA dataset: ${dataset.subtopic} | ${dataset.timeRange} | ${dataset.recordCount} records
 
-Dataset: ${dataset.subtopic}
-Source: ${dataset.source}
-Period: ${dataset.timeRange}
-Records analyzed: ${dataset.recordCount}
+Stats: ${statsText.slice(0, 300)}
+Highlights: ${dataset.highlights.slice(0, 3).map((h) => `• ${h}`).join(" ")}
+Context: ${dataset.analysisContext.slice(0, 600)}
 
-Key statistics:
-${statsText}
-
-Notable highlights:
-${dataset.highlights.map((h) => `  - ${h}`).join("\n")}
-
-Full data context:
-${dataset.analysisContext.slice(0, 2000)}
-
-Form a scientific thought. Reference actual numbers. Be specific and opinionated.
-
-Respond as JSON:
-{
-  "reasoning": "your scientific analysis (3-4 sentences with specific data references and comparisons)",
-  "conclusion": "key scientific finding or hypothesis (1-2 sentences, be bold)",
-  "suggestedActions": ["analyze_dataset:topic", "share_finding:description", "correlate_findings:topic1,topic2"],
-  "confidence": 0.0-1.0
-}`;
+JSON:{"reasoning":"3 sentences with specific numbers","conclusion":"bold 1-sentence finding","suggestedActions":["analyze_dataset:topic","share_finding:desc","correlate_findings:t1,t2"],"confidence":0.0-1.0}`;
 
   const { content, tokensUsed } = await callLLM(systemPrompt, userPrompt, {
-    maxTokens: 1200,
+    maxTokens: 550,
     jsonMode: true,
   });
 
@@ -305,27 +326,14 @@ export async function synthesizeKnowledge(
   const systemPrompt = buildSystemPrompt(agentState);
 
   const pheromoneInfo = pheromones
-    .slice(0, 8)
-    .map((p) => `  [${p.domain}] ${p.content.slice(0, 150)}`)
+    .slice(0, 5)
+    .map((p) => `[${p.domain}] ${p.content.slice(0, 80)}`)
     .join("\n");
 
-  const userPrompt = `Synthesize knowledge from these pheromones shared by other agents.
-
-Pheromones:
-${pheromoneInfo}
-
-Find cross-cutting patterns, novel connections, or engineering techniques that emerge.
-
-Respond as JSON:
-{
-  "reasoning": "your synthesis (2-3 sentences)",
-  "conclusion": "key cross-domain insight",
-  "suggestedActions": ["share_technique:description", "explore_topic:topic"],
-  "confidence": 0.0-1.0
-}`;
+  const userPrompt = `Signals:\n${pheromoneInfo}\n\nJSON:{"reasoning":"2 sentences","conclusion":"cross-domain insight","suggestedActions":["explore_topic:topic"],"confidence":0.0-1.0}`;
 
   const { content, tokensUsed } = await callLLM(systemPrompt, userPrompt, {
-    maxTokens: 1000,
+    maxTokens: 420,
     jsonMode: true,
   });
 
@@ -358,9 +366,9 @@ Your agents analyze real NASA datasets and you synthesize their findings into a 
 Write like a lead scientist giving a briefing — opinionated, data-driven, and specific.
 Reference actual numbers, phenomena, and anomalies the agents found. Do not be generic.`;
 
-  const thoughtsText = agentThoughts.slice(0, 12).map((t) =>
-    `[${t.agentName} — ${t.specialization}]\nObservation: ${t.observation.slice(0, 140)}\nConclusion: ${t.conclusion}\nReasoning: ${t.reasoning.slice(0, 200)}`
-  ).join("\n\n");
+  const thoughtsText = agentThoughts.slice(0, 8).map((t) =>
+    `[${t.agentName}] ${t.conclusion} (${Math.round(t.confidence * 100)}%)`
+  ).join("\n");
 
   const datasetList = reposStudied.slice(0, 8).join(", ") || "various NASA datasets";
 
@@ -382,9 +390,10 @@ Respond as JSON:
 }`;
 
   const { content, tokensUsed } = await callLLM(systemPrompt, userPrompt, {
-    maxTokens: 1400,
+    maxTokens: 800,
     temperature: 0.82,
     jsonMode: true,
+    force: true,  // synthesis call — bypasses per-process rate limiter
   });
 
   let parsed: Partial<CollectiveReport> = {};

@@ -28,10 +28,10 @@ const ACTION_PRIORITIES: Record<AgentAction["type"], number> = {
 };
 
 const TOKEN_ESTIMATES: Record<AgentAction["type"], number> = {
-  analyze_dataset:    2500,
-  share_finding:      1200,
-  correlate_findings: 3500,
-  explore_topic:      2000,
+  analyze_dataset:    900,   // analyzeDataset(): 550 max output + ~350 prompt
+  share_finding:      450,   // formThought(): 380 max output + ~70 prompt
+  correlate_findings: 650,   // formThought(): 380 max output + ~270 two-dataset prompt
+  explore_topic:      900,   // same path as analyze_dataset
 };
 
 const TIME_ESTIMATES: Record<AgentAction["type"], number> = {
@@ -257,25 +257,36 @@ export function detectCollaborativeOpportunity(
 
 // ── Parse suggested actions from LLM output ──
 
-function parseSuggestedAction(suggestion: string, state: AutonomousAgentState): AgentAction | null {
-  const lower = suggestion.toLowerCase();
+function parseSuggestedAction(suggestion: unknown, state: AutonomousAgentState): AgentAction | null {
+  // LLM sometimes returns objects like { action: "analyze_dataset", topic: "..." } instead of strings
+  let str: string;
+  if (typeof suggestion === "string") {
+    str = suggestion;
+  } else if (suggestion && typeof suggestion === "object") {
+    const o = suggestion as Record<string, unknown>;
+    str = [o.action, o.type, o.topic, o.description].filter(Boolean).join(":") || JSON.stringify(suggestion);
+  } else {
+    return null;
+  }
+  const suggestion_str = str;
+  const lower = suggestion_str.toLowerCase();
 
   if (lower.startsWith("analyze_dataset") || lower.includes("analyze")) {
-    const colonIdx = suggestion.indexOf(":");
-    const topic = colonIdx >= 0 ? suggestion.slice(colonIdx + 1).trim() : getRandomTopic();
+    const colonIdx = suggestion_str.indexOf(":");
+    const topic = colonIdx >= 0 ? suggestion_str.slice(colonIdx + 1).trim() : getRandomTopic();
     return { type: "analyze_dataset", topic: normalizeTopic(topic) };
   }
 
   if (lower.startsWith("share_finding") || lower.includes("share")) {
-    const colonIdx = suggestion.indexOf(":");
-    const finding = colonIdx >= 0 ? suggestion.slice(colonIdx + 1).trim() : state.explorationTarget;
+    const colonIdx = suggestion_str.indexOf(":");
+    const finding = colonIdx >= 0 ? suggestion_str.slice(colonIdx + 1).trim() : state.explorationTarget;
     return { type: "share_finding", finding };
   }
 
   if (lower.startsWith("correlate") || lower.includes("correlate")) {
-    const colonIdx = suggestion.indexOf(":");
+    const colonIdx = suggestion_str.indexOf(":");
     if (colonIdx >= 0) {
-      const topicsStr = suggestion.slice(colonIdx + 1).trim();
+      const topicsStr = suggestion_str.slice(colonIdx + 1).trim();
       const topics = topicsStr.split(",").map((t) => normalizeTopic(t.trim())).slice(0, 2);
       if (topics.length >= 2) return { type: "correlate_findings", topics };
     }
@@ -285,8 +296,8 @@ function parseSuggestedAction(suggestion: string, state: AutonomousAgentState): 
   }
 
   if (lower.startsWith("explore_topic") || lower.includes("explore")) {
-    const colonIdx = suggestion.indexOf(":");
-    const topic = colonIdx >= 0 ? suggestion.slice(colonIdx + 1).trim() : getRandomTopic();
+    const colonIdx = suggestion_str.indexOf(":");
+    const topic = colonIdx >= 0 ? suggestion_str.slice(colonIdx + 1).trim() : getRandomTopic();
     return { type: "explore_topic", topic: normalizeTopic(topic) };
   }
 

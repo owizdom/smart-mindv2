@@ -419,6 +419,10 @@
     .header .stat-chip.active  { border-color: #7ab8ff; color: #7ab8ff; }
     .header .stat-chip.active .v { color: #7ab8ff; }
     .header .stat-chip.green .v { color: #5adc7a; }
+    .header .stat-chip.amber { border-color: #fcd34d; color: #fcd34d; }
+    .header .stat-chip.amber .v { color: #fcd34d; }
+    .header .stat-chip.reveal { border-color: #5adc7a; color: #5adc7a; }
+    .header .stat-chip.reveal .v { color: #5adc7a; }
     .header .phase-badge { background: linear-gradient(90deg,#5adc7a,#00b8d9); }
     .inject-input { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.22); color: #fff; }
     .inject-input::placeholder { color: rgba(255,255,255,.38); }
@@ -504,6 +508,7 @@
       <div class="stat-chip green">Synced <span class="v" id="h-synced">0/0</span></div>
       <div class="stat-chip">Tokens <span class="v" id="h-tokens">0</span></div>
       <div class="stat-chip">Density <span class="v" id="h-density">0.000</span></div>
+      <div class="stat-chip" id="h-cycle-chip">Cycle <span class="v" id="h-cycle-val">explore</span></div>
       <div class="phase-badge" id="h-phase">Phase Transition</div>
     </div>
     <div class="inject-wrap">
@@ -623,8 +628,13 @@
             <!-- Per-agent attestation cards -->
             <div id="attestation-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px;margin-bottom:22px"></div>
 
+            <!-- Commit-reveal proofs -->
+            <div style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px;margin-top:22px">Commit-Reveal Proofs</div>
+            <div style="font-size:11px;color:var(--text-3);margin-bottom:10px;line-height:1.6">Each agent seals its findings to EigenDA before gossip begins. The KZG commitment hash below proves what each agent knew before seeing any peer's output.</div>
+            <div id="commitments-section"><div class="empty"><div class="empty-icon">·</div>Waiting for first commit phase...</div></div>
+
             <!-- Live verified pheromones -->
-            <div style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px">Latest Verified Signals</div>
+            <div style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.8px;margin-bottom:8px;margin-top:22px">Latest Verified Signals</div>
             <div id="verified-pheromones"></div>
           </div>
         </div>
@@ -815,10 +825,11 @@ function renderFocusPanel() {
     document.getElementById('focus-content').innerHTML = `
       <div class="focus-head">
         <div class="focus-av" style="background:${color}">${(a.name||'').slice(0,2)}</div>
-        <div>
+        <div style="flex:1">
           <div class="focus-name">${a.name}</div>
           <div class="focus-sub">${a.specialization||''} ${a.synchronized?'<span class="synced-badge">Synced</span>':''}</div>
         </div>
+        ${a.cyclePhase ? `<div style="font-size:9px;font-family:monospace;color:${{explore:'#818cf8',commit:'#f59e0b',reveal:'#10b981'}[a.cyclePhase]||'#818cf8'};border:1px solid ${{explore:'#818cf8',commit:'#f59e0b',reveal:'#10b981'}[a.cyclePhase]||'#818cf8'}55;border-radius:6px;padding:1px 6px">${a.cyclePhase}</div>` : ''}
       </div>
       <div class="focus-stats">
         <div class="focus-stat"><div class="focus-stat-val">${a.discoveries||0}</div><div class="focus-stat-lbl">Found</div></div>
@@ -1341,6 +1352,25 @@ function renderMemory(m) {
     if (r.verdict) html += `<div class="report-block"><div class="report-label verdict">Verdict</div><div class="report-prose verdict">${r.verdict}</div></div>`;
   }
 
+  // Independence proofs — show commitmentHash per agent if present
+  const proofs = m.preCommitProofs ? Object.entries(m.preCommitProofs) : [];
+  if (proofs.length > 0) {
+    html += `<div class="report-block" style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border)">
+      <div class="report-label" style="color:#818cf8;margin-bottom:7px">Independence Proofs</div>
+      <div style="display:flex;flex-direction:column;gap:5px">
+        ${proofs.map(([agentId, hash]) => {
+          const agName = agents.find(a => a.id === agentId)?.name || agentId.slice(0, 8);
+          const isEigenDA = String(hash).startsWith('eigenda:');
+          return `<div style="display:flex;gap:8px;align-items:flex-start;background:var(--surface-2);border-radius:var(--radius-sm);padding:6px 10px;font-size:10px">
+            <div style="font-weight:700;color:var(--text-2);min-width:56px;padding-top:1px">${agName}</div>
+            <div style="font-family:monospace;color:${isEigenDA ? '#818cf8' : 'var(--text-3)'};word-break:break-all;flex:1">${String(hash).slice(0, 48)}…</div>
+            <div style="flex-shrink:0;color:${isEigenDA ? '#818cf8' : 'var(--text-3)'}">${isEigenDA ? '◈ KZG' : '◎ SHA-256'}</div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }
+
   return html + '</div>';
 }
 
@@ -1484,6 +1514,12 @@ async function refresh() {
     document.getElementById('h-tokens').textContent = fmtTokens(stateRes.totalTokens || metrics.totalTokens || 0);
     document.getElementById('h-density').textContent = ((stateRes.density || metrics.density || 0).toFixed ? (stateRes.density || metrics.density || 0).toFixed(3) : '0.000');
 
+    // Cycle phase chip
+    const phase = stateRes.cyclePhase || 'explore';
+    document.getElementById('h-cycle-val').textContent = phase;
+    const cycleChip = document.getElementById('h-cycle-chip');
+    cycleChip.className = `stat-chip${phase === 'commit' ? ' amber' : phase === 'reveal' ? ' reveal' : ''}`;
+
 
     // Live density for scatter blend
     liveDensity = stateRes.density || 0;
@@ -1502,15 +1538,6 @@ async function refresh() {
       triggerBurst();
       triggerScatterReset();
 
-      // Auto-switch to Collective tab — delay so report has time to generate
-      setTimeout(() => {
-        switchTab('collective');
-        safeJson(API+'/api/collective', []).then(data => {
-          document.getElementById('collective-list').innerHTML = data.length > 0
-            ? data.slice(-10).reverse().map(renderMemory).join('')
-            : '<div class="empty"><div class="empty-icon">·</div>No collective memories yet</div>';
-        });
-      }, 3500);
     }
     prevTransition = stateRes.phaseTransitionOccurred;
 
@@ -1530,11 +1557,15 @@ async function refresh() {
     document.getElementById('agent-list').innerHTML = safeAgents.map(a => {
       const color = getColor(a.id);
       const action = (a.currentAction||'idle').length>24 ? a.currentAction.slice(0,24)+'..' : a.currentAction||'idle';
+      const agPhase = a.cyclePhase || 'explore';
+      const phaseColors = { explore: '#818cf8', commit: '#f59e0b', reveal: '#10b981' };
+      const phaseColor = phaseColors[agPhase] || '#818cf8';
       return `<div class="agent-row ${a.synchronized?'synced':''} ${a.id===focusedAgentId?'focused':''}" onclick="openFocus('${a.id}')">
         <div class="agent-av" style="background:${color}">${(a.name||'').slice(0,2)}</div>
         <div class="agent-info"><div class="agent-name">${a.name}</div><div class="agent-action">${action}</div></div>
         <div class="agent-meta">
           <div class="agent-disc">${a.discoveries}</div>
+          <div class="agent-cr"><div class="cr-dot" style="background:${phaseColor}"></div>${agPhase}</div>
         </div>
       </div>`;
     }).join('');
@@ -1564,11 +1595,16 @@ async function refresh() {
     document.getElementById('agents-grid').innerHTML = safeAgents.map(a=>{
       const color = getColor(a.id);
       const tokenPct = Math.min((a.tokensUsed||0)/(a.tokenBudget||1)*100,100).toFixed(0);
+      const agPhase = a.cyclePhase || 'explore';
+      const phaseColors = { explore: '#818cf8', commit: '#f59e0b', reveal: '#10b981' };
+      const phaseColor = phaseColors[agPhase] || '#818cf8';
+      const commitHash = a.commitmentHash;
       return `<div class="agent-card" onclick="switchTab('live');setTimeout(()=>openFocus('${a.id}'),50)">
         <div class="agent-card-head">
           <div class="agent-card-av" style="background:${color}">${(a.name||'').slice(0,2)}</div>
           <div><div class="agent-card-name">${a.name}</div>
           <div class="agent-card-spec">${a.specialization||''} ${a.synchronized?'<span class="synced-badge">Synced</span>':''}</div></div>
+          <div style="margin-left:auto;display:flex;align-items:center;gap:4px;font-size:9.5px;font-family:monospace;color:${phaseColor};border:1px solid ${phaseColor}55;border-radius:8px;padding:1px 7px">${agPhase}</div>
         </div>
         <div class="stats-row">
           <div class="stat-box"><div class="stat-box-val">${a.discoveries||0}</div><div class="stat-box-lbl">Found</div></div>
@@ -1579,7 +1615,8 @@ async function refresh() {
           <div class="bar-label"><span>Token budget</span><span>${fmtTokens(a.tokensUsed||0)} / ${fmtTokens(a.tokenBudget||0)}</span></div>
           <div class="bar-track"><div class="bar-fill token-fill" style="width:${tokenPct}%"></div></div>
         </div>
-        ${a.latestThought?`<div class="latest-box">${a.latestThought.slice(0,150)}${a.latestThought.length>150?'...':''}</div>`:''}
+        ${commitHash?`<div style="background:var(--surface-2);border-radius:var(--radius-sm);padding:5px 8px;margin-top:6px;font-size:9.5px;color:var(--text-3);font-family:monospace;display:flex;gap:6px;align-items:center"><span style="color:#818cf8;font-weight:600">sealed</span><span style="word-break:break-all">${commitHash.slice(0,40)}…</span></div>`:''}
+        ${a.latestThought?`<div class="latest-box" style="margin-top:6px">${a.latestThought.slice(0,150)}${a.latestThought.length>150?'...':''}</div>`:''}
       </div>`;
     }).join('');
 
@@ -1639,16 +1676,26 @@ async function fetchAttestation() {
         const color = getColor(proof.agent?.id || '');
         const tee = proof.compute?.teeMode;
         const latest = proof.latestPheromone;
+        const cr = proof.commitReveal;
+        const crPhase = cr?.cyclePhase || 'explore';
+        const phaseColors = { explore: '#818cf8', commit: '#f59e0b', reveal: '#10b981' };
+        const phaseColor = phaseColors[crPhase] || '#818cf8';
         return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px">
           <div style="display:flex;align-items:center;gap:9px;margin-bottom:12px">
             <div style="width:32px;height:32px;border-radius:50%;background:${color};display:flex;align-items:center;justify-content:center;color:white;font-size:11px;font-weight:700">${(proof.agent?.name||'').slice(0,2)}</div>
-            <div>
+            <div style="flex:1">
               <div style="font-weight:700;font-size:13px">${proof.agent?.name||'?'}</div>
               <div style="font-size:10px;color:var(--text-3)">${tee ? '🔒 EigenCompute TEE' : '🔑 Ed25519 Identity'}</div>
             </div>
+            <div style="font-size:9.5px;font-family:monospace;color:${phaseColor};border:1px solid ${phaseColor}55;border-radius:6px;padding:1px 6px">${crPhase}</div>
           </div>
           <div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Public Key Fingerprint</div>
           <div style="font-family:monospace;font-size:11px;word-break:break-all;margin-bottom:10px;color:var(--text)">${proof.agent?.fingerprint||'—'}</div>
+          ${cr?.commitmentHash ? `
+          <div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Sealed Commitment</div>
+          <div style="font-size:9.5px;font-family:monospace;background:var(--surface-2);border-radius:4px;padding:5px 8px;margin-bottom:8px;word-break:break-all;color:${cr.committedViaEigenDA?'#818cf8':'var(--text-3)'}">
+            ${cr.commitmentHash.slice(0,52)}… <span style="color:var(--text-3)">${cr.committedViaEigenDA ? '◈ KZG' : '◎ sha256'}</span>
+          </div>` : ''}
           ${latest ? `
           <div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Latest Signal</div>
           <div style="font-size:10.5px;background:var(--surface-2);border-radius:4px;padding:6px 8px;margin-bottom:6px">${(latest.content||'').slice(0,100)}...</div>
@@ -1665,6 +1712,34 @@ async function fetchAttestation() {
       }).join('');
     } else {
       grid.innerHTML = '<div class="empty"><div class="empty-icon">·</div>Agents not responding</div>';
+    }
+
+    // Commit-reveal proofs section
+    const commitsRes = await safeJson(API+'/api/commitments', []);
+    const commitSection = document.getElementById('commitments-section');
+    if (commitsRes && commitsRes.length > 0) {
+      commitSection.innerHTML = commitsRes.filter(Boolean).map(c => {
+        const agColor = getColor(agents.find(a => a.name === c.agentName)?.id || '');
+        const isEigenDA = c.committedViaEigenDA;
+        const ts = c.committedAt ? new Date(c.committedAt).toLocaleTimeString() : '—';
+        return `<div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:12px 14px;margin-bottom:8px">
+          <div style="display:flex;align-items:center;gap:9px;margin-bottom:8px">
+            <div style="width:26px;height:26px;border-radius:50%;background:${agColor};display:flex;align-items:center;justify-content:center;color:white;font-size:9px;font-weight:700">${(c.agentName||'').slice(0,2)}</div>
+            <div style="flex:1">
+              <div style="font-weight:700;font-size:12px">${c.agentName||c.agentId}</div>
+              <div style="font-size:10px;color:var(--text-3)">sealed at ${ts}</div>
+            </div>
+            <div style="font-size:9.5px;color:${isEigenDA?'#818cf8':'var(--text-3)'}">
+              ${isEigenDA ? '◈ KZG (EigenDA)' : '◎ SHA-256 (local)'}
+            </div>
+          </div>
+          <div style="font-size:10px;color:var(--text-3);margin-bottom:3px">Commitment Hash</div>
+          <div style="font-size:9.5px;font-family:monospace;word-break:break-all;background:var(--surface-2);padding:5px 8px;border-radius:4px;color:${isEigenDA?'#818cf8':'var(--text)'}">${c.commitmentHash||'—'}</div>
+          ${c.sealedBlobHash ? `<div style="font-size:9px;color:var(--text-3);margin-top:5px;font-family:monospace">blob: ${c.sealedBlobHash.slice(0,32)}…</div>` : ''}
+        </div>`;
+      }).join('');
+    } else {
+      commitSection.innerHTML = '<div class="empty"><div class="empty-icon">·</div>Waiting for first commit phase…</div>';
     }
 
     // Verified pheromones

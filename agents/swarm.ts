@@ -53,6 +53,8 @@ function createChannel(): PheromoneChannel {
     criticalThreshold: CRITICAL_DENSITY,
     phaseTransitionOccurred: false,
     transitionStep: null,
+    cyclePhase: "explore",
+    phaseStartStep: 0,
   };
 }
 

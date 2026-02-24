@@ -13,6 +13,7 @@ export interface Pheromone {
   attestation: string;       // Ed25519 sig: "ed25519:<sig>:<pubkey>" or SHA-256 fallback
   agentPubkey?: string;      // Agent's Ed25519 public key (hex) for verification
   eigendaCommitment?: string; // KZG commitment from EigenDA once anchored
+  preCommitRef?: string;     // agent's commitmentHash — proves content was sealed before reveal
 }
 
 /** What each agent knows and is doing */
@@ -39,6 +40,8 @@ export interface PheromoneChannel {
   criticalThreshold: number; // When sync happens
   phaseTransitionOccurred: boolean;
   transitionStep: number | null;
+  cyclePhase: CyclePhase;
+  phaseStartStep: number;
 }
 
 /** LLM-written collective intelligence report */
@@ -61,6 +64,7 @@ export interface CollectiveMemory {
   attestation: string;       // Hash of the full synthesis
   createdAt: number;
   report?: CollectiveReport; // LLM-written narrative report
+  preCommitProofs?: Record<string, string>;  // agentId → commitmentHash
 }
 
 /** Full swarm state for dashboard */
@@ -203,6 +207,9 @@ export interface AutonomousAgentState extends AgentState {
   personality: AgentPersonality;
   currentAction: string;
   identity: AgentIdentity;    // Cryptographic identity (TEE keypair on EigenCompute)
+  commitmentHash?: string;
+  commitTimestamp?: number;
+  cyclePhase?: CyclePhase;
 }
 
 /** Collaborative project detected among agents */
@@ -224,4 +231,86 @@ export function hash(content: string): string {
 
 export function hashObject(obj: unknown): string {
   return hash(JSON.stringify(obj));
+}
+
+// ── Commit-Reveal Types ──
+
+export type CyclePhase = "explore" | "commit" | "reveal" | "synthesis";
+
+export interface FindingSummary {
+  pheromoneId: string;
+  contentHash: string;     // sha256(content) hex
+  domain: string;
+  confidence: number;
+  timestamp: number;
+}
+
+export interface SealedBlob {
+  agentId: string;
+  agentPublicKey: string;         // hex-encoded Ed25519 SPKI
+  agentName: string;
+  explorationEndedAt: number;
+  eigenDAReferenceBlock: number | null;  // Ethereum block from EigenDA batch — objective timestamp
+  eigenDABatchId: string | null;         // EigenDA batch identifier
+  teeInstanceId: string;                 // EIGENCOMPUTE_INSTANCE_ID || "local"
+  findings: FindingSummary[];
+  topicsCovered: string[];
+  independenceProof: string; // ed25519:<sig(agentId|eigenDAReferenceBlock|sha256(sortedHashes))>:<pubkey>
+}
+
+export interface AgentCommitment {
+  agentId: string;
+  agentName: string;
+  agentPublicKey: string;
+  commitmentHash: string;          // "eigenda:<kzg>" or "sha256:<hex>" fallback
+  committedViaEigenDA: boolean;
+  sealedBlobHash: string;          // sha256(JSON.stringify(sealedBlob))
+  committedAt: number;
+  cycleStartStep: number;
+  eigenDABatchId: string | null;
+  eigenDAReferenceBlock: number | null;
+}
+
+// ── Evidence Bundle — machine-verifiable proof of independent convergence ──
+
+export interface CommitmentRecord {
+  agentId: string;
+  agentName: string;
+  kzgHash: string;
+  eigenDABatchId: string | null;
+  eigenDAReferenceBlock: number | null;
+  submittedAt: number;              // coordinator wall-clock — not agent local time
+  committedViaEigenDA: boolean;
+  sealedBlobHash: string;
+}
+
+export interface IntegrityCheck {
+  agentId: string;
+  agentName: string;
+  committedSealedBlobHash: string; // what was committed
+  // A verifier fetches the blob from EigenDA and checks sha256(blob) === committedSealedBlobHash
+  verificationUrl: string | null;  // eigenda-proxy /get/<kzgHash> if available
+  passed: boolean | null;          // null = cannot verify without EigenDA access
+}
+
+export interface IndependenceCheck {
+  agentId: string;
+  agentName: string;
+  eigenDAReferenceBlock: number | null;
+  commitWindowCloseBlock: number | null;  // coordinator's reveal-start block estimate
+  // independentBeforeReveal = eigenDAReferenceBlock < commitWindowCloseBlock
+  independentBeforeReveal: boolean | null;
+}
+
+export interface EvidenceBundle {
+  cycleId: string;
+  cycleNumber: number;
+  generatedAt: number;
+  commitments: CommitmentRecord[];
+  integrityChecks: IntegrityCheck[];
+  independenceChecks: IndependenceCheck[];
+  allCommitted: boolean;           // all expected agents submitted commits
+  allIndependentBeforeReveal: boolean | null;
+  synthesis: CollectiveReport | null;
+  verifierInstructions: string;
 }

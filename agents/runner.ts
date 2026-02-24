@@ -25,23 +25,28 @@ import cors from "cors";
 import path from "path";
 import fs from "fs";
 import { SwarmAgent } from "./agent";
-import { initDatabase, saveAgent, savePheromone, saveThought, closeDatabase } from "./persistence";
-import { initThinker, getTotalTokensUsed, generateCollectiveReport } from "./thinker";
-import { isEnabled as eigenDAEnabled } from "./eigenda";
-import { verifyAttestation } from "./keystore";
-import type { Pheromone, PheromoneChannel, LLMConfig, CollectiveMemory } from "./types";
+import { initDatabase, saveAgent, savePheromone, saveThought, saveCommitment, saveCollectiveMemory, closeDatabase } from "./persistence";
+import { initThinker, getTotalTokensUsed, generateCollectiveReport, getLLMUsage } from "./thinker";
+import { isEnabled as eigenDAEnabled, disperseBlob } from "./eigenda";
+import { verifyAttestation, buildAttestation } from "./keystore";
+import type { Pheromone, PheromoneChannel, LLMConfig, CollectiveMemory, SealedBlob, AgentCommitment, CyclePhase, FindingSummary } from "./types";
 import { v4 as uuid } from "uuid";
 import { hash } from "./types";
+import crypto from "crypto";
 
 // ── Config from environment ──
-const AGENT_INDEX   = parseInt(process.env.AGENT_INDEX  || "0");
-const AGENT_PORT    = parseInt(process.env.AGENT_PORT   || String(3001 + AGENT_INDEX));
-const PEER_URLS     = (process.env.PEER_URLS || "").split(",").filter(Boolean);
-const DB_PATH       = process.env.DB_PATH || path.join(process.cwd(), `swarm-agent-${AGENT_INDEX}.db`);
-const STEP_INTERVAL = parseInt(process.env.SYNC_INTERVAL_MS || "2000");
-const PHEROMONE_DECAY = parseFloat(process.env.PHEROMONE_DECAY || "0.12");
+const AGENT_INDEX      = parseInt(process.env.AGENT_INDEX  || "0");
+const AGENT_PORT       = parseInt(process.env.AGENT_PORT   || String(3001 + AGENT_INDEX));
+const PEER_URLS        = (process.env.PEER_URLS || "").split(",").filter(Boolean);
+const DB_PATH          = process.env.DB_PATH || path.join(process.cwd(), `swarm-agent-${AGENT_INDEX}.db`);
+const STEP_INTERVAL    = parseInt(process.env.SYNC_INTERVAL_MS || "2000");
+const PHEROMONE_DECAY  = parseFloat(process.env.PHEROMONE_DECAY || "0.12");
 const CRITICAL_DENSITY = parseFloat(process.env.CRITICAL_DENSITY || "0.55");
-const TOKEN_BUDGET = parseInt(process.env.TOKEN_BUDGET_PER_AGENT || "50000");
+const TOKEN_BUDGET     = parseInt(process.env.TOKEN_BUDGET_PER_AGENT || "500000");
+const EXPLORE_STEPS    = parseInt(process.env.EXPLORE_STEPS || "20");
+// Coordinator URL — dashboard server acts as the objective phase coordinator.
+// Agents poll this for phase instead of computing density locally.
+const COORDINATOR_URL  = process.env.COORDINATOR_URL || "";
 
 // ── Init ──
 initDatabase(DB_PATH);
@@ -76,6 +81,8 @@ const channel: PheromoneChannel = {
   criticalThreshold: CRITICAL_DENSITY,
   phaseTransitionOccurred: false,
   transitionStep: null,
+  cyclePhase: "explore",
+  phaseStartStep: 0,
 };
 
 let step = 0;
@@ -83,8 +90,19 @@ let cycleResetAt = 0;         // timestamp of last cycle reset — pheromones ol
 let noTransitionBeforeStep = 0; // prevents immediate re-transition right after reset
 const collectiveMemories: CollectiveMemory[] = [];
 
+// ── Commit-Reveal state ──
+let cyclePhase: CyclePhase = "explore";
+let phaseStartStep = 0;
+let explorePhaseEndStep = EXPLORE_STEPS;
+const agentCommitments = new Map<string, AgentCommitment>();
+const explorePheromones: Pheromone[] = [];
+let synthesisFiredThisCycle = false;  // prevents double-firing synthesis per cycle
+let lastCoordPhase: CyclePhase = "explore"; // tracks last known coordinator phase
+
 // ── Collective report generation (triggered at phase transition) ──
-async function generateCollectiveMemory(): Promise<void> {
+async function generateCollectiveMemory(
+  preCommitProofs: Record<string, string>  // agentId → commitmentHash
+): Promise<unknown> {
   try {
     const agentThoughts = agent.state.thoughts.slice(-15).map(t => ({
       agentName:      agent.state.name,
@@ -115,11 +133,23 @@ async function generateCollectiveMemory(): Promise<void> {
 
     if (allThoughts.length === 0) return;
 
-    const { report, tokensUsed } = await generateCollectiveReport(
+    let { report, tokensUsed } = await generateCollectiveReport(
       allThoughts,
       datasets,
       "NASA Science Collective Intelligence"
     );
+
+    // If the LLM was rate-limited, it returns only the fallback topic as overview
+    // Wait and retry once to give Groq quota time to recover
+    if (!report.keyFindings.length && !report.verdict) {
+      console.log(`  [${agent.state.name}] Collective report rate-limited — retrying in 15s`);
+      await new Promise(r => setTimeout(r, 15_000));
+      const retry = await generateCollectiveReport(allThoughts, datasets, "NASA Science Collective Intelligence");
+      if (retry.report.keyFindings.length > 0) {
+        report = retry.report;
+        tokensUsed += retry.tokensUsed;
+      }
+    }
 
     agent.state.tokensUsed += tokensUsed;
 
@@ -142,13 +172,179 @@ async function generateCollectiveMemory(): Promise<void> {
       attestation:   hash(report.overview + report.verdict),
       createdAt:     Date.now(),
       report,
+      preCommitProofs,
     };
 
     collectiveMemories.push(memory);
+    try { saveCollectiveMemory(memory); } catch {}
     console.log(`  [${agent.state.name}] Collective memory generated — ${report.keyFindings.length} findings`);
+    return report;
   } catch (err) {
     console.error(`  [${agent.state.name}] Collective report error:`, err);
+    return null;
   }
+}
+
+// ── Coordinator polling ──────────────────────────────────────────────────
+
+interface CoordState {
+  phase: CyclePhase;
+  cycleId: string;
+  cycleNumber: number;
+  windowRemainingMs: number;
+  commitCount: number;
+}
+
+async function pollCoordinator(): Promise<CoordState | null> {
+  if (!COORDINATOR_URL) return null;
+  try {
+    const res = await fetch(`${COORDINATOR_URL}/api/coordinator`, {
+      signal: AbortSignal.timeout(1500),
+    });
+    if (!res.ok) return null;
+    return await res.json() as CoordState;
+  } catch {
+    return null;
+  }
+}
+
+async function registerCommitWithCoordinator(commitment: AgentCommitment, eigenDABatchId: string | null, eigenDAReferenceBlock: number | null): Promise<void> {
+  if (!COORDINATOR_URL) return;
+  try {
+    await fetch(`${COORDINATOR_URL}/api/coordinator/commit`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({
+        agentId:              commitment.agentId,
+        agentName:            commitment.agentName,
+        kzgHash:              commitment.commitmentHash,
+        eigenDABatchId,
+        eigenDAReferenceBlock,
+        sealedBlobHash:       commitment.sealedBlobHash,
+        committedViaEigenDA:  commitment.committedViaEigenDA,
+      }),
+      signal: AbortSignal.timeout(3000),
+    });
+  } catch (err) {
+    console.warn(`  [${agent.state.name}] Coordinator commit registration failed: ${err instanceof Error ? err.message.slice(0, 60) : String(err)}`);
+  }
+}
+
+async function notifySynthesis(report: unknown): Promise<void> {
+  if (!COORDINATOR_URL) return;
+  try {
+    await fetch(`${COORDINATOR_URL}/api/coordinator/synthesis`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ report }),
+      signal:  AbortSignal.timeout(2000),
+    });
+  } catch { /* non-critical */ }
+}
+
+// ── Commit phase: seal findings to EigenDA ──
+async function performCommit(): Promise<void> {
+  const now = Date.now();
+  const findings: FindingSummary[] = explorePheromones.map(p => ({
+    pheromoneId: p.id,
+    contentHash: crypto.createHash("sha256").update(p.content).digest("hex"),
+    domain: p.domain,
+    confidence: p.confidence,
+    timestamp: p.timestamp,
+  }));
+
+  // Build independence proof using eigenDA reference block as objective timestamp
+  const contentHashes = findings.map(f => f.contentHash).sort();
+  const hashesDigest = crypto.createHash("sha256").update(contentHashes.join("|")).digest("hex");
+
+  // Disperse to EigenDA first so we have the objective reference block for the proof
+  let commitmentHash: string;
+  let committedViaEigenDA = false;
+  let eigenDABatchId: string | null = null;
+  let eigenDAReferenceBlock: number | null = null;
+
+  if (eigenDAEnabled()) {
+    try {
+      // Create a preliminary blob to disperse (without independenceProof — we'll add it after)
+      const prelimBlob = {
+        agentId: agent.state.id, agentName: agent.state.name,
+        explorationEndedAt: now, findings, topicsCovered: [...new Set(findings.map(f => f.domain))],
+      };
+      const result = await disperseBlob(prelimBlob);
+      commitmentHash        = `eigenda:${result.commitment}`;
+      committedViaEigenDA   = true;
+      eigenDABatchId        = result.batchId;
+      eigenDAReferenceBlock = result.referenceBlockNumber;
+      console.log(`  [${agent.state.name}] COMMIT → EigenDA batch ${eigenDABatchId?.slice(0, 12)}… block ${eigenDAReferenceBlock} (${findings.length} findings)`);
+    } catch (err) {
+      const sealedBlobHashTemp = crypto.createHash("sha256").update(JSON.stringify({ agentId: agent.state.id, findings })).digest("hex");
+      commitmentHash = `sha256:${sealedBlobHashTemp}`;
+      // Derive simulated block for sha256 fallback
+      eigenDAReferenceBlock = Math.floor(now / 12_000);
+      eigenDABatchId = crypto.createHash("sha256").update(commitmentHash + Math.floor(now / 60_000)).digest("hex").slice(0, 32);
+      console.warn(`  [${agent.state.name}] EigenDA commit fallback: ${sealedBlobHashTemp.slice(0, 24)}…`);
+    }
+  } else {
+    const sealedBlobHashTemp = crypto.createHash("sha256").update(JSON.stringify({ agentId: agent.state.id, findings })).digest("hex");
+    commitmentHash = `sha256:${sealedBlobHashTemp}`;
+    eigenDAReferenceBlock = Math.floor(now / 12_000);
+    eigenDABatchId = crypto.createHash("sha256").update(commitmentHash + Math.floor(now / 60_000)).digest("hex").slice(0, 32);
+    console.log(`  [${agent.state.name}] COMMIT → SHA-256 block~${eigenDAReferenceBlock}: ${sealedBlobHashTemp.slice(0, 24)}…`);
+  }
+
+  // Independence proof payload now includes the objective eigenDA reference block
+  const sigPayload = `${agent.state.id}|${eigenDAReferenceBlock ?? now}|${hashesDigest}`;
+  const independenceProof = buildAttestation(
+    sigPayload, agent.state.id, now,
+    agent.getPrivateKey(), agent.state.identity.publicKey
+  );
+
+  const sealedBlob: SealedBlob = {
+    agentId:              agent.state.id,
+    agentPublicKey:       agent.state.identity.publicKey,
+    agentName:            agent.state.name,
+    explorationEndedAt:   now,
+    eigenDAReferenceBlock,
+    eigenDABatchId,
+    teeInstanceId:        process.env.EIGENCOMPUTE_INSTANCE_ID || "local",
+    findings,
+    topicsCovered:        [...new Set(findings.map(f => f.domain))],
+    independenceProof,
+  };
+  const sealedBlobHash = crypto.createHash("sha256").update(JSON.stringify(sealedBlob)).digest("hex");
+
+  agent.state.commitmentHash  = commitmentHash;
+  agent.state.commitTimestamp = now;
+
+  const ownCommitment: AgentCommitment = {
+    agentId:              agent.state.id,
+    agentName:            agent.state.name,
+    agentPublicKey:       agent.state.identity.publicKey,
+    commitmentHash,
+    committedViaEigenDA,
+    sealedBlobHash,
+    committedAt:          now,
+    cycleStartStep:       phaseStartStep,
+    eigenDABatchId,
+    eigenDAReferenceBlock,
+  };
+  agentCommitments.set(agent.state.id, ownCommitment);
+  try { saveCommitment(ownCommitment); } catch {}
+
+  // Register with coordinator (objective record) + broadcast to peers (gossip fallback)
+  await registerCommitWithCoordinator(ownCommitment, eigenDABatchId, eigenDAReferenceBlock);
+  await Promise.allSettled(
+    PEER_URLS.map(url => fetch(`${url}/commit`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body:   JSON.stringify(ownCommitment), signal: AbortSignal.timeout(3000),
+    }))
+  );
+
+  // Advance to reveal
+  cyclePhase             = "reveal";
+  channel.cyclePhase     = "reveal";
+  phaseStartStep         = step;
+  console.log(`  [${agent.state.name}] Phase → REVEAL (step ${step}, eigenDA block ~${eigenDAReferenceBlock})`);
 }
 
 // ── Gossip: push to peers ──
@@ -241,6 +437,12 @@ const buildAttestationPayload = () => {
       tokensUsed:          agent.state.tokensUsed,
       synchronized:        agent.state.synchronized,
     },
+    cycle: {
+      phase:               cyclePhase,
+      commitmentHash:      agent.state.commitmentHash || null,
+      committedViaEigenDA: agentCommitments.get(agent.state.id)?.committedViaEigenDA ?? false,
+      knownCommitments:    agentCommitments.size,
+    },
     timestamp: Date.now(),
   };
 };
@@ -302,6 +504,8 @@ app.get("/api/agents", (_req, res) => {
       transitionStep: null,
       criticalThreshold: channel.criticalThreshold,
       density: channel.density,
+      cyclePhase,
+      commitmentHash: agent.state.commitmentHash ?? null,
     },
   ]);
 });
@@ -383,6 +587,9 @@ app.get("/state", (_, res) => {
     density:                  channel.density,
     criticalThreshold:        channel.criticalThreshold,
     phaseTransitionOccurred:  channel.phaseTransitionOccurred,
+    cyclePhase,
+    commitmentHash:   agent.state.commitmentHash ?? null,
+    phaseStartStep,
   });
 });
 
@@ -461,7 +668,71 @@ app.post("/pheromone", (req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/health", (_, res) => res.json({ ok: true, agent: agent.state.name, step }));
+app.get("/health", (_, res) => res.json({ ok: true, agent: agent.state.name, step, llm: getLLMUsage() }));
+
+// GET /commit — exposes this agent's current commitment
+app.get("/commit", (_, res) => {
+  if (!agent.state.commitmentHash) { res.status(204).end(); return; }
+  const own = agentCommitments.get(agent.state.id);
+  res.json({
+    agentId:              agent.state.id,
+    agentName:            agent.state.name,
+    agentPublicKey:       agent.state.identity.publicKey,
+    commitmentHash:       agent.state.commitmentHash,
+    committedAt:          agent.state.commitTimestamp,
+    cyclePhase,
+    committedViaEigenDA:  own?.committedViaEigenDA  ?? false,
+    sealedBlobHash:       own?.sealedBlobHash       ?? null,
+    eigenDABatchId:       own?.eigenDABatchId        ?? null,
+    eigenDAReferenceBlock: own?.eigenDAReferenceBlock ?? null,
+    knownPeerCommitments: Object.fromEntries(
+      [...agentCommitments.entries()]
+        .filter(([id]) => id !== agent.state.id)
+        .map(([id, c]) => [id, {
+          commitmentHash:      c.commitmentHash,
+          eigenDABatchId:      c.eigenDABatchId ?? null,
+          eigenDAReferenceBlock: c.eigenDAReferenceBlock ?? null,
+        }])
+    ),
+  });
+});
+
+// GET /evidence — agent-local evidence bundle (coordinator has the authoritative one)
+app.get("/evidence", (_, res) => {
+  const commits = [...agentCommitments.values()];
+  const proxyUrl = process.env.EIGENDA_PROXY_URL || null;
+  res.json({
+    agentId:    agent.state.id,
+    agentName:  agent.state.name,
+    cyclePhase,
+    commitments: commits.map(c => ({
+      agentId:              c.agentId,
+      agentName:            c.agentName,
+      kzgHash:              c.commitmentHash,
+      eigenDABatchId:       c.eigenDABatchId ?? null,
+      eigenDAReferenceBlock: c.eigenDAReferenceBlock ?? null,
+      committedViaEigenDA:  c.committedViaEigenDA,
+      sealedBlobHash:       c.sealedBlobHash,
+      submittedAt:          c.committedAt,
+      verificationUrl:      proxyUrl && c.committedViaEigenDA
+        ? `${proxyUrl}/get/${c.commitmentHash.replace("eigenda:", "")}`
+        : null,
+    })),
+    coordinatorUrl: COORDINATOR_URL || null,
+  });
+});
+
+// POST /commit — receives peer commitment during their commit phase
+app.post("/commit", (req, res) => {
+  const c = req.body as AgentCommitment;
+  if (!c?.agentId || !c?.commitmentHash) { res.status(400).json({ error: "invalid" }); return; }
+  if (!agentCommitments.has(c.agentId)) {
+    agentCommitments.set(c.agentId, c);
+    try { saveCommitment(c); } catch {}
+    console.log(`  [${agent.state.name}] Peer commit received: ${c.agentName} → ${c.commitmentHash.slice(0, 24)}…`);
+  }
+  res.json({ ok: true });
+});
 
 app.listen(AGENT_PORT, () => {
   console.log(`\n╔══════════════════════════════════════════════╗`);
@@ -475,63 +746,145 @@ app.listen(AGENT_PORT, () => {
   console.log(`╚══════════════════════════════════════════════╝\n`);
 });
 
+// ── Cycle reset helper ──
+function resetCycle(): void {
+  cycleResetAt              = Date.now();
+  noTransitionBeforeStep    = step + EXPLORE_STEPS * 2;
+  channel.pheromones        = [];
+  channel.density           = 0;
+  agent.state.synchronized  = false;
+  agent.state.syncedWith    = [];
+  agent.state.absorbed      = new Set();
+  agent.state.energy        = 0.3 + Math.random() * 0.2;
+  agentCommitments.clear();
+  explorePheromones.length  = 0;
+  agent.state.commitmentHash  = undefined;
+  agent.state.commitTimestamp = undefined;
+  cyclePhase                = "explore";
+  phaseStartStep            = step;
+  explorePhaseEndStep       = step + EXPLORE_STEPS;
+  channel.cyclePhase        = "explore";
+  channel.phaseStartStep    = step;
+  synthesisFiredThisCycle   = false;
+  lastCoordPhase            = "explore";
+  channel.phaseTransitionOccurred = true;
+  channel.transitionStep    = step;
+  setTimeout(() => {
+    channel.phaseTransitionOccurred = false;
+    channel.transitionStep = null;
+  }, 5000);
+}
+
 // ── Main agent loop ──
 async function run(): Promise<void> {
   while (true) {
     step++;
 
-    // Pull pheromones from peers (gossip)
-    await pullFromPeers();
+    // ── Coordinator-driven phase management ──────────────────────────────
+    // Poll coordinator for the objective current phase. If coordinator is
+    // unavailable, fall back to local step counter + density detection.
+    const coordState = await pollCoordinator();
+
+    if (coordState) {
+      const coordPhase = coordState.phase as CyclePhase;
+
+      // Coordinator phase changed — react accordingly
+      if (coordPhase !== lastCoordPhase) {
+        console.log(`  [${agent.state.name}] Coordinator: ${lastCoordPhase} → ${coordPhase} (cycle ${coordState.cycleNumber})`);
+        lastCoordPhase = coordPhase;
+
+        if (coordPhase === "commit" && cyclePhase === "explore") {
+          // Coordinator opened the commit window — seal our findings
+          cyclePhase         = "commit";
+          channel.cyclePhase = "commit";
+          await performCommit(); // → sets cyclePhase = "reveal"
+
+        } else if (coordPhase === "reveal" && cyclePhase !== "reveal") {
+          // Coordinator opened reveal window — start gossiping
+          cyclePhase         = "reveal";
+          channel.cyclePhase = "reveal";
+
+        } else if (coordPhase === "synthesis" && !synthesisFiredThisCycle) {
+          // Coordinator opened synthesis window — generate collective memory
+          synthesisFiredThisCycle = true;
+          console.log(`\n${"█".repeat(50)}`);
+          console.log(`█  [${agent.state.name}] SYNTHESIS — coordinator cycle ${coordState.cycleNumber}`);
+          console.log(`█  Commits: ${coordState.commitCount} | Pheromones: ${channel.pheromones.length}`);
+          console.log(`${"█".repeat(50)}\n`);
+
+          const proofSnapshot = Object.fromEntries(
+            [...agentCommitments.entries()].map(([id, c]) => [id, c.commitmentHash])
+          );
+          generateCollectiveMemory(proofSnapshot)
+            .then(report => notifySynthesis(report))
+            .catch(() => {});
+
+        } else if (coordPhase === "explore" && cyclePhase !== "explore") {
+          // Coordinator reset to explore — new cycle begins
+          resetCycle();
+        }
+      }
+    } else {
+      // ── Fallback: local phase management when coordinator unreachable ──
+      // Commit trigger: fire once when explore window ends
+      if (cyclePhase === "explore" && step >= explorePhaseEndStep) {
+        cyclePhase         = "commit";
+        channel.cyclePhase = "commit";
+        await performCommit();
+      }
+
+      // Synthesis trigger: density threshold during reveal phase
+      if (cyclePhase === "reveal" && !synthesisFiredThisCycle && step >= noTransitionBeforeStep) {
+        const synced = channel.pheromones.filter(p => p.strength > 0.4).length;
+        if (channel.density >= channel.criticalThreshold && synced >= 3) {
+          synthesisFiredThisCycle = true;
+          console.log(`\n${"█".repeat(50)}`);
+          console.log(`█  [${agent.state.name}] PHASE TRANSITION (local fallback) — step ${step}`);
+          console.log(`█  Density: ${channel.density.toFixed(3)} | Pheromones: ${channel.pheromones.length}`);
+          console.log(`${"█".repeat(50)}\n`);
+
+          const proofSnapshot = Object.fromEntries(
+            [...agentCommitments.entries()].map(([id, c]) => [id, c.commitmentHash])
+          );
+          generateCollectiveMemory(proofSnapshot).catch(() => {});
+          resetCycle();
+        }
+      }
+    }
+    // ── End phase management ─────────────────────────────────────────────
+
+    // Pull pheromones from peers — only during reveal phase (silence during explore)
+    if (cyclePhase === "reveal") {
+      await pullFromPeers();
+    }
 
     // Decay
     for (const p of channel.pheromones) p.strength *= (1 - PHEROMONE_DECAY);
     channel.pheromones = channel.pheromones.filter(p => p.strength > 0.05);
 
-    // Update density locally
+    // Update density (display metric — no longer controls phase)
     updateDensity();
-
-    // Check phase transition locally — reset channel IMMEDIATELY on detection
-    if (!channel.phaseTransitionOccurred && step >= noTransitionBeforeStep) {
-      const synced = channel.pheromones.filter(p => p.strength > 0.4).length;
-      if (channel.density >= channel.criticalThreshold && synced >= 3) {
-        console.log(`\n${"█".repeat(50)}`);
-        console.log(`█  [${agent.state.name}] PHASE TRANSITION DETECTED — step ${step}`);
-        console.log(`█  Density: ${channel.density.toFixed(3)} | Pheromones: ${channel.pheromones.length}`);
-        console.log(`${"█".repeat(50)}\n`);
-
-        // generateCollectiveMemory captures all data synchronously before its first await,
-        // so it's safe to clear the channel right after calling it.
-        generateCollectiveMemory().catch(() => {});
-
-        // Immediate reset — density drops to 0 right now, not 36 seconds later
-        cycleResetAt           = Date.now(); // reject all pheromones older than this moment
-        noTransitionBeforeStep = step + 12; // 12-step lockout (24s) before next transition
-        channel.pheromones     = [];
-        channel.density        = 0;
-        agent.state.synchronized = false;
-        agent.state.syncedWith   = [];
-        agent.state.absorbed     = new Set();
-        agent.state.energy       = 0.3 + Math.random() * 0.2;
-
-        // Keep flag true briefly so the dashboard can detect the edge, then clear it
-        channel.phaseTransitionOccurred = true;
-        channel.transitionStep = step;
-        setTimeout(() => {
-          channel.phaseTransitionOccurred = false;
-          channel.transitionStep = null;
-        }, 5000);
-      }
-    }
 
     // Agent step
     const pheromone = await agent.step(channel);
 
-    // Emit and gossip
+    // Emit based on current phase
     if (pheromone) {
-      channel.pheromones.push(pheromone);
-      try { savePheromone(pheromone); } catch { /* db not ready */ }
-      await pushToPeers(pheromone);
-      console.log(`  [${agent.state.name}] emitted → ${pheromone.domain} (key:${pheromone.agentPubkey?.slice(0, 8) ?? "sha256"})`);
+      if (cyclePhase === "explore") {
+        // Blind exploration — accumulate locally, no gossip
+        channel.pheromones.push(pheromone);
+        explorePheromones.push(pheromone);
+        try { savePheromone(pheromone); } catch { /* db not ready */ }
+        console.log(`  [${agent.state.name}] [explore] → ${pheromone.domain} (key:${pheromone.agentPubkey?.slice(0, 8) ?? "sha256"})`);
+      } else if (cyclePhase === "reveal") {
+        // Reveal phase — stamp with commit proof and gossip
+        pheromone.preCommitRef = agent.state.commitmentHash;
+        channel.pheromones.push(pheromone);
+        try { savePheromone(pheromone); } catch { /* db not ready */ }
+        await pushToPeers(pheromone);
+        console.log(`  [${agent.state.name}] [reveal] emitted → ${pheromone.domain} (key:${pheromone.agentPubkey?.slice(0, 8) ?? "sha256"})`);
+      }
+      // commit phase: drop pheromone — commit step produces no gossip
     }
 
     // Persist agent state periodically

@@ -6,6 +6,7 @@ import type {
   Pheromone,
   CollectiveMemory,
   AutonomousAgentState,
+  AgentCommitment,
 } from "./types";
 import { disperseAsync } from "./eigenda";
 
@@ -65,8 +66,25 @@ export function initDatabase(dbPath?: string): Database.Database {
       contributors_json TEXT DEFAULT '[]',
       confidence REAL,
       timestamp INTEGER,
-      eigenda_commitment TEXT
+      eigenda_commitment TEXT,
+      pre_commit_proofs_json TEXT,
+      report_json TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS commits (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      agent_id TEXT NOT NULL,
+      agent_name TEXT NOT NULL,
+      agent_public_key TEXT NOT NULL,
+      commitment_hash TEXT NOT NULL,
+      committed_via_eigenda INTEGER NOT NULL DEFAULT 0,
+      sealed_blob_hash TEXT NOT NULL,
+      committed_at INTEGER NOT NULL,
+      cycle_start_step INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_commits_agent ON commits(agent_id);
+    CREATE INDEX IF NOT EXISTS idx_commits_at ON commits(committed_at);
 
     CREATE TABLE IF NOT EXISTS decisions (
       id TEXT PRIMARY KEY,
@@ -128,6 +146,10 @@ export function initDatabase(dbPath?: string): Database.Database {
   for (const table of ["thoughts", "pheromones", "collective_memories"]) {
     try { db.exec(`ALTER TABLE ${table} ADD COLUMN eigenda_commitment TEXT`); } catch { /* column exists */ }
   }
+  try { db.exec(`CREATE TABLE IF NOT EXISTS commits (id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, agent_name TEXT NOT NULL, agent_public_key TEXT NOT NULL, commitment_hash TEXT NOT NULL, committed_via_eigenda INTEGER NOT NULL DEFAULT 0, sealed_blob_hash TEXT NOT NULL, committed_at INTEGER NOT NULL, cycle_start_step INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)`); } catch {}
+  try { db.exec(`ALTER TABLE pheromones ADD COLUMN pre_commit_ref TEXT`); } catch {}
+  try { db.exec(`ALTER TABLE collective_memories ADD COLUMN pre_commit_proofs_json TEXT`); } catch {}
+  try { db.exec(`ALTER TABLE collective_memories ADD COLUMN report_json TEXT`); } catch {}
 
   return db;
 }
@@ -213,8 +235,8 @@ export function saveThought(thought: AgentThought): void {
 export function savePheromone(pheromone: Pheromone): void {
   const d = getDb();
   d.prepare(`
-    INSERT OR REPLACE INTO pheromones (id, agent_id, content, domain, confidence, strength, connections_json, timestamp, attestation, eigenda_commitment)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO pheromones (id, agent_id, content, domain, confidence, strength, connections_json, timestamp, attestation, eigenda_commitment, pre_commit_ref)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     pheromone.id,
     pheromone.agentId,
@@ -225,7 +247,8 @@ export function savePheromone(pheromone: Pheromone): void {
     JSON.stringify(pheromone.connections),
     pheromone.timestamp,
     pheromone.attestation,
-    null
+    null,
+    pheromone.preCommitRef ?? null
   );
 
   // Disperse pheromone to EigenDA — the returned commitment replaces the local hash
@@ -245,8 +268,8 @@ export function savePheromone(pheromone: Pheromone): void {
 export function saveCollectiveMemory(memory: CollectiveMemory): void {
   const d = getDb();
   d.prepare(`
-    INSERT OR REPLACE INTO collective_memories (id, domain, synthesis, contributors_json, confidence, timestamp, eigenda_commitment)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO collective_memories (id, domain, synthesis, contributors_json, confidence, timestamp, eigenda_commitment, pre_commit_proofs_json, report_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     memory.id,
     memory.topic,
@@ -254,7 +277,9 @@ export function saveCollectiveMemory(memory: CollectiveMemory): void {
     JSON.stringify(memory.contributors),
     memory.confidence,
     memory.createdAt,
-    null
+    null,
+    JSON.stringify(memory.preCommitProofs ?? {}),
+    memory.report ? JSON.stringify(memory.report) : null
   );
 
   // Collective memories are the high-value output — always anchor to EigenDA
@@ -266,6 +291,19 @@ export function saveCollectiveMemory(memory: CollectiveMemory): void {
       console.log(`  [EigenDA] Collective memory anchored: ${result.commitment.slice(0, 24)}…`);
     } catch { /* DB closed */ }
   }, `collective:${memory.topic}`);
+}
+
+export function saveCommitment(commitment: AgentCommitment): void {
+  getDb().prepare(`
+    INSERT INTO commits
+      (agent_id, agent_name, agent_public_key, commitment_hash,
+       committed_via_eigenda, sealed_blob_hash, committed_at, cycle_start_step, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    commitment.agentId, commitment.agentName, commitment.agentPublicKey,
+    commitment.commitmentHash, commitment.committedViaEigenDA ? 1 : 0,
+    commitment.sealedBlobHash, commitment.committedAt, commitment.cycleStartStep, Date.now()
+  );
 }
 
 export function getRecentThoughts(limit = 50): AgentThought[] {
@@ -352,7 +390,7 @@ export function getRecentPheromones(limit = 50): Array<{ id: string; domain: str
   }));
 }
 
-export function getCollectiveMemories(): Array<{ id: string; domain: string; synthesis: string; eigendaCommitment: string | null; timestamp: number }> {
+export function getCollectiveMemories(): Array<{ id: string; domain: string; synthesis: string; eigendaCommitment: string | null; timestamp: number; preCommitProofs?: Record<string, string>; report?: unknown }> {
   const d = getDb();
   const rows = d.prepare("SELECT * FROM collective_memories ORDER BY timestamp DESC").all() as Record<string, unknown>[];
   return rows.map((r) => ({
@@ -361,6 +399,8 @@ export function getCollectiveMemories(): Array<{ id: string; domain: string; syn
     synthesis: r.synthesis as string,
     eigendaCommitment: (r.eigenda_commitment as string | null),
     timestamp: r.timestamp as number,
+    preCommitProofs: r.pre_commit_proofs_json ? JSON.parse(r.pre_commit_proofs_json as string) : undefined,
+    report: r.report_json ? JSON.parse(r.report_json as string) : undefined,
   }));
 }
 

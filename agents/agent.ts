@@ -118,6 +118,10 @@ export class SwarmAgent {
     this.engineeringEnabled = true;
   }
 
+  getPrivateKey(): string {
+    return this.keypair.privateKey;
+  }
+
   private shouldDoEngineering(): boolean {
     if (!this.engineeringEnabled) return false;
     if (this.state.tokensUsed >= this.state.tokenBudget) return false;

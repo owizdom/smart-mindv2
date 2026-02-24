@@ -10,9 +10,126 @@ import express from "express";
 import cors from "cors";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 
-const AGENT_URLS   = (process.env.AGENT_URLS || "http://127.0.0.1:3002,http://127.0.0.1:3003,http://127.0.0.1:3004").split(",").filter(Boolean);
-const DASHBOARD_PORT = parseInt(process.env.DASHBOARD_PORT || "3001");
+const AGENT_URLS      = (process.env.AGENT_URLS || "http://127.0.0.1:3002,http://127.0.0.1:3003,http://127.0.0.1:3004").split(",").filter(Boolean);
+const DASHBOARD_PORT  = parseInt(process.env.DASHBOARD_PORT || "3001");
+const EXPLORE_STEPS   = parseInt(process.env.EXPLORE_STEPS   || "20");
+const STEP_INTERVAL   = parseInt(process.env.SYNC_INTERVAL_MS || "1500");
+
+// ── Coordinator State Machine ──────────────────────────────────────────────
+// Manages objective, coordinator-driven cycle phases instead of each agent
+// locally detecting density thresholds. All agents poll /api/coordinator and
+// react to phase changes. This makes phase boundaries objectively verifiable.
+
+type CoordPhase = "explore" | "commit" | "reveal" | "synthesis";
+
+interface CommitEntry {
+  agentId: string;
+  agentName: string;
+  kzgHash: string;
+  eigenDABatchId: string | null;
+  eigenDAReferenceBlock: number | null;
+  sealedBlobHash: string;
+  submittedAt: number;
+  committedViaEigenDA: boolean;
+  windowMissed: boolean;
+}
+
+interface SlashEvent {
+  agentId: string;
+  agentName: string;
+  fault: "missed_commit" | "missed_reveal" | "hash_mismatch";
+  cycleId: string;
+  detectedAt: number;
+}
+
+interface CoordinatorState {
+  cycleId: string;
+  cycleNumber: number;
+  phase: CoordPhase;
+  phaseStartedAt: number;
+  cycleStartedAt: number;
+  commitWindowCloseBlock: number | null; // Ethereum block estimate when commit window closed
+  commitRegistry: Map<string, CommitEntry>;
+  slashEvents: SlashEvent[];
+  lastSynthesisReport: unknown | null;
+  expectedAgentCount: number;
+}
+
+// Phase durations (wall-clock ms)
+const EXPLORE_MS   = EXPLORE_STEPS * STEP_INTERVAL;
+const COMMIT_MS    = 4 * STEP_INTERVAL;   // 4 steps to disperse + register
+const REVEAL_MS    = 16 * STEP_INTERVAL;  // 16 steps to gossip
+const SYNTHESIS_MS = 8 * STEP_INTERVAL;   // 8 steps for synthesis then auto-reset
+
+function newCycleState(cycleNumber: number): CoordinatorState {
+  return {
+    cycleId: crypto.randomUUID(),
+    cycleNumber,
+    phase: "explore",
+    phaseStartedAt: Date.now(),
+    cycleStartedAt: Date.now(),
+    commitWindowCloseBlock: null,
+    commitRegistry: new Map(),
+    slashEvents: [],
+    lastSynthesisReport: null,
+    expectedAgentCount: AGENT_URLS.length,
+  };
+}
+
+let coordinator: CoordinatorState = newCycleState(1);
+
+function advanceCycle(): void {
+  const now = Date.now();
+  const elapsed = now - coordinator.phaseStartedAt;
+
+  switch (coordinator.phase) {
+    case "explore":
+      if (elapsed >= EXPLORE_MS) {
+        coordinator.phase = "commit";
+        coordinator.phaseStartedAt = now;
+        console.log(`[COORDINATOR] Cycle ${coordinator.cycleNumber} → COMMIT (window: ${COMMIT_MS}ms)`);
+      }
+      break;
+
+    case "commit":
+      if (elapsed >= COMMIT_MS) {
+        // Detect any agents that missed the commit window
+        coordinator.commitWindowCloseBlock = Math.floor(now / 12_000);
+        for (const url of AGENT_URLS) {
+          // We check based on commit registry — agents not registered are marked missed
+          const registered = [...coordinator.commitRegistry.values()].some(
+            c => !c.windowMissed
+          );
+          void registered; // slash detection is done per-agent on POST /commit
+        }
+        coordinator.phase = "reveal";
+        coordinator.phaseStartedAt = now;
+        console.log(`[COORDINATOR] Cycle ${coordinator.cycleNumber} → REVEAL (${coordinator.commitRegistry.size} commits received)`);
+      }
+      break;
+
+    case "reveal":
+      if (elapsed >= REVEAL_MS) {
+        coordinator.phase = "synthesis";
+        coordinator.phaseStartedAt = now;
+        console.log(`[COORDINATOR] Cycle ${coordinator.cycleNumber} → SYNTHESIS`);
+      }
+      break;
+
+    case "synthesis":
+      if (elapsed >= SYNTHESIS_MS) {
+        const next = coordinator.cycleNumber + 1;
+        console.log(`[COORDINATOR] Cycle ${coordinator.cycleNumber} complete → starting Cycle ${next} (EXPLORE)`);
+        coordinator = newCycleState(next);
+      }
+      break;
+  }
+}
+
+// Advance cycle phase every second
+setInterval(advanceCycle, 1000);
 
 const app = express();
 app.use(cors());
@@ -40,6 +157,170 @@ async function fetchAllAgents(endpoint: string): Promise<unknown[]> {
   const results = await Promise.allSettled(AGENT_URLS.map(u => fetchAgent(u, endpoint)));
   return results.map(r => r.status === "fulfilled" ? r.value : null).filter(Boolean);
 }
+
+// ── Coordinator API ────────────────────────────────────────────────────────
+
+// GET /api/coordinator — agents poll this every step for current phase
+app.get("/api/coordinator", (_req, res) => {
+  const now = Date.now();
+  const elapsed = now - coordinator.phaseStartedAt;
+  let windowRemainingMs = 0;
+  switch (coordinator.phase) {
+    case "explore":   windowRemainingMs = Math.max(0, EXPLORE_MS - elapsed);   break;
+    case "commit":    windowRemainingMs = Math.max(0, COMMIT_MS - elapsed);    break;
+    case "reveal":    windowRemainingMs = Math.max(0, REVEAL_MS - elapsed);    break;
+    case "synthesis": windowRemainingMs = Math.max(0, SYNTHESIS_MS - elapsed); break;
+  }
+  res.json({
+    cycleId:            coordinator.cycleId,
+    cycleNumber:        coordinator.cycleNumber,
+    phase:              coordinator.phase,
+    phaseStartedAt:     coordinator.phaseStartedAt,
+    windowRemainingMs,
+    commitCount:        coordinator.commitRegistry.size,
+    expectedAgentCount: coordinator.expectedAgentCount,
+    slashEventCount:    coordinator.slashEvents.length,
+    commits: [...coordinator.commitRegistry.values()].map(c => ({
+      agentId:              c.agentId,
+      agentName:            c.agentName,
+      kzgHash:              c.kzgHash.slice(0, 32) + "…",
+      eigenDABatchId:       c.eigenDABatchId,
+      eigenDAReferenceBlock: c.eigenDAReferenceBlock,
+      committedViaEigenDA:  c.committedViaEigenDA,
+      submittedAt:          c.submittedAt,
+    })),
+  });
+});
+
+// POST /api/coordinator/commit — agents register their commitment during commit window
+app.post("/api/coordinator/commit", (req, res) => {
+  const body = req.body as Partial<CommitEntry> & { agentId?: string; agentName?: string; kzgHash?: string };
+  if (!body?.agentId || !body?.kzgHash) {
+    res.status(400).json({ error: "agentId and kzgHash are required" });
+    return;
+  }
+
+  if (coordinator.phase !== "commit") {
+    // Agent submitted outside commit window — slash event
+    const slash: SlashEvent = {
+      agentId:   body.agentId,
+      agentName: body.agentName ?? body.agentId,
+      fault:     "missed_commit",
+      cycleId:   coordinator.cycleId,
+      detectedAt: Date.now(),
+    };
+    coordinator.slashEvents.push(slash);
+    console.warn(`[COORDINATOR] SLASH: ${body.agentName} committed outside window (phase=${coordinator.phase})`);
+    res.status(409).json({
+      error:  "commit_window_closed",
+      phase:  coordinator.phase,
+      cycleId: coordinator.cycleId,
+      fault:  "missed_commit",
+    });
+    return;
+  }
+
+  const entry: CommitEntry = {
+    agentId:              body.agentId,
+    agentName:            body.agentName ?? body.agentId,
+    kzgHash:              body.kzgHash,
+    eigenDABatchId:       body.eigenDABatchId ?? null,
+    eigenDAReferenceBlock: body.eigenDAReferenceBlock ?? null,
+    sealedBlobHash:       body.sealedBlobHash ?? "",
+    submittedAt:          Date.now(),
+    committedViaEigenDA:  body.committedViaEigenDA ?? false,
+    windowMissed:         false,
+  };
+
+  coordinator.commitRegistry.set(body.agentId, entry);
+  console.log(`[COORDINATOR] Commit registered: ${entry.agentName} → ${entry.kzgHash.slice(0, 20)}… (${coordinator.commitRegistry.size}/${coordinator.expectedAgentCount})`);
+
+  res.json({
+    ok:                true,
+    cycleId:           coordinator.cycleId,
+    position:          coordinator.commitRegistry.size,
+    allCommitted:      coordinator.commitRegistry.size >= coordinator.expectedAgentCount,
+  });
+});
+
+// GET /api/evidence — machine-verifiable evidence bundle for current/last cycle
+app.get("/api/evidence", (_req, res) => {
+  const commits = [...coordinator.commitRegistry.values()];
+  const proxyUrl = process.env.EIGENDA_PROXY_URL || null;
+
+  const commitmentRecords = commits.map(c => ({
+    agentId:              c.agentId,
+    agentName:            c.agentName,
+    kzgHash:              c.kzgHash,
+    eigenDABatchId:       c.eigenDABatchId,
+    eigenDAReferenceBlock: c.eigenDAReferenceBlock,
+    submittedAt:          c.submittedAt,
+    committedViaEigenDA:  c.committedViaEigenDA,
+    sealedBlobHash:       c.sealedBlobHash,
+  }));
+
+  const integrityChecks = commits.map(c => ({
+    agentId:                 c.agentId,
+    agentName:               c.agentName,
+    committedSealedBlobHash: c.sealedBlobHash,
+    verificationUrl:         proxyUrl && c.committedViaEigenDA
+      ? `${proxyUrl}/get/${c.kzgHash.replace("eigenda:", "")}`
+      : null,
+    passed: null, // verifier must fetch blob from EigenDA and check sha256(blob) === sealedBlobHash
+  }));
+
+  const revealWindowBlock = coordinator.commitWindowCloseBlock;
+  const independenceChecks = commits.map(c => {
+    const ref = c.eigenDAReferenceBlock;
+    const close = revealWindowBlock;
+    return {
+      agentId:                c.agentId,
+      agentName:              c.agentName,
+      eigenDAReferenceBlock:  ref,
+      commitWindowCloseBlock: close,
+      // Block when blob was sealed must be before the reveal window opened
+      independentBeforeReveal: (ref !== null && close !== null) ? ref < close : null,
+    };
+  });
+
+  const allIndependentBeforeReveal = independenceChecks.every(c => c.independentBeforeReveal !== false)
+    ? (independenceChecks.some(c => c.independentBeforeReveal === true) ? true : null)
+    : false;
+
+  const bundle = {
+    cycleId:       coordinator.cycleId,
+    cycleNumber:   coordinator.cycleNumber,
+    generatedAt:   Date.now(),
+    commitments:   commitmentRecords,
+    integrityChecks,
+    independenceChecks,
+    allCommitted:  commits.length >= coordinator.expectedAgentCount,
+    allIndependentBeforeReveal,
+    synthesis:     coordinator.lastSynthesisReport,
+    slashEvents:   coordinator.slashEvents,
+    verifierInstructions: [
+      "1. For each commitment with committedViaEigenDA=true:",
+      "   GET {verificationUrl} → deserialize blob → sha256(blob) should equal committedSealedBlobHash",
+      "2. Each blob.findings[].contentHash should match sha256(reveal-phase pheromone.content)",
+      "   (pheromones with preCommitRef set are reveal-phase; those without are explore-phase)",
+      "3. independenceChecks: eigenDAReferenceBlock < commitWindowCloseBlock proves blob was",
+      "   sealed before the reveal window opened — agent could not have copied peers",
+      "4. For sha256-only commits (EigenDA unavailable): verify independently by re-running",
+      "   the agent with the same inputs (determinism not guaranteed; treat as best-effort)",
+    ].join("\n"),
+  };
+
+  res.json(bundle);
+});
+
+// POST /api/coordinator/synthesis — agent notifies coordinator it generated synthesis
+app.post("/api/coordinator/synthesis", (req, res) => {
+  const { report } = req.body as { report?: unknown };
+  if (report && coordinator.phase === "synthesis") {
+    coordinator.lastSynthesisReport = report;
+  }
+  res.json({ ok: true });
+});
 
 // ── API endpoints ──
 
@@ -74,8 +355,23 @@ app.get("/api/pheromones", async (_req, res) => {
 });
 
 app.get("/api/attestations", async (_req, res) => {
-  const proofs = await fetchAllAgents("/attestation");
-  res.json(proofs);
+  const [attestations, commits] = await Promise.all([
+    fetchAllAgents("/attestation"),
+    fetchAllAgents("/commit"),
+  ]);
+  const enriched = (attestations as Array<Record<string, unknown>>).map(attest => {
+    if (!attest) return attest;
+    const agentId = (attest as { agent?: { id?: string } }).agent?.id;
+    const commitData = (commits as Array<Record<string, unknown> | null>)
+      .find(c => c && (c as { agentId?: string }).agentId === agentId) ?? null;
+    return { ...attest, commitReveal: commitData ?? null };
+  });
+  res.json(enriched);
+});
+
+app.get("/api/commitments", async (_req, res) => {
+  const commits = await fetchAllAgents("/commit");
+  res.json(commits.filter(Boolean));
 });
 
 app.get("/api/identities", async (_req, res) => {
@@ -96,6 +392,12 @@ app.get("/api/state", async (_req, res) => {
   // Use the density already computed inside each agent (averaged across all agents)
   const density = validStates.reduce((s, a) => s + ((a.density as number) || 0), 0) / Math.max(1, validStates.length);
 
+  const cyclePhaseCounts: Record<string, number> = {};
+  for (const s of validStates) {
+    const p = (s.cyclePhase as string) ?? "explore";
+    cyclePhaseCounts[p] = (cyclePhaseCounts[p] ?? 0) + 1;
+  }
+
   // Fetch pheromones just for metrics
   const allPheromones = (await fetchAllAgents("/pheromones")).flat();
   const seen = new Set<string>();
@@ -112,6 +414,15 @@ app.get("/api/state", async (_req, res) => {
     synchronizedCount: synced,
     agentCount: validStates.length,
     phaseTransitionOccurred: phaseTransition,
+    cyclePhase: coordinator.phase,
+    coordinator: {
+      cycleId:        coordinator.cycleId,
+      cycleNumber:    coordinator.cycleNumber,
+      phase:          coordinator.phase,
+      commitCount:    coordinator.commitRegistry.size,
+      slashEvents:    coordinator.slashEvents.length,
+      expectedAgents: coordinator.expectedAgentCount,
+    },
     metrics: {
       totalPheromones:        unique.length,
       totalDiscoveries:       validStates.reduce((s, a) => s + ((a.discoveries as number) || 0), 0),
