@@ -52,7 +52,7 @@ deploy_agent() {
   local index="$2"
   local bootstrap="${3:-}"
 
-  local app_name="swarm-${name,,}-${RUN_ID}"
+  local app_name="swarm-$(echo "$name" | tr '[:upper:]' '[:lower:]')-${RUN_ID}"
 
   echo ""
   echo "==> Deploying $name (index=$index) as: $app_name"
@@ -63,25 +63,37 @@ deploy_agent() {
   cp "$ENV_FILE" "$tmp_env"
   {
     echo "AGENT_INDEX=$index"
-    echo "AGENT_PORT=3002"
+    echo "AGENT_PORT=80"
     echo "DHT_PORT=4002"
     echo "NETWORK_ID=$NETWORK_ID"
     echo "DB_PATH=/data/swarm-agent.db"
     [[ -n "$bootstrap" ]] && echo "PEER_URLS=$bootstrap"
   } >> "$tmp_env"
 
-  ecloud compute app deploy \
-    --environment   "$ENVIRONMENT" \
-    --name          "$app_name" \
-    --image-ref     "$IMAGE" \
-    --dockerfile    "Dockerfile.agent" \
-    --env-file      "$tmp_env" \
-    --instance-type "$INSTANCE_TYPE" \
-    --private-key   "$ECLOUD_PRIVATE_KEY" \
-    --rpc-url       "$ECLOUD_RPC_URL" \
-    --log-visibility public \
-    --skip-profile \
-    --resource-usage-monitoring disable
+  local app_id="${5:-}"
+
+  if [[ -n "$app_id" ]]; then
+    echo "  → Upgrading existing app $app_id"
+    ecloud compute app upgrade \
+      --app-id      "$app_id" \
+      --image-ref   "$IMAGE" \
+      --env-file    "$tmp_env" \
+      --private-key "$ECLOUD_PRIVATE_KEY" \
+      --rpc-url     "$ECLOUD_RPC_URL"
+  else
+    ecloud compute app deploy \
+      --environment   "$ENVIRONMENT" \
+      --name          "$app_name" \
+      --image-ref     "$IMAGE" \
+      --dockerfile    "Dockerfile.agent" \
+      --env-file      "$tmp_env" \
+      --instance-type "$INSTANCE_TYPE" \
+      --private-key   "$ECLOUD_PRIVATE_KEY" \
+      --rpc-url       "$ECLOUD_RPC_URL" \
+      --log-visibility public \
+      --skip-profile \
+      --resource-usage-monitoring disable
+  fi
 
   rm -f "$tmp_env"
   echo "  ✓ $name deployed: $app_name"
