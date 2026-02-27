@@ -123,12 +123,6 @@ Each agent operates as an **AVS-style operator**:
 - Registers `{ kzgHash, eigenDABatchId, eigenDAReferenceBlock }` with the coordinator
 - Reveals during the reveal window with pheromones carrying `preCommitRef`
 
-Objective faults the coordinator tracks:
-- **Missed commit**: agent did not register before commit window closed → slash event recorded
-- **Late commit**: agent submitted after the window → slash event with `fault: "missed_commit"`
-
-The coordinator is currently a lightweight server; in production, this would be an on-chain contract enforcing windows with actual ETH slashing.
-
 ---
 
 ## The Independence Problem and LLM Sycophancy
