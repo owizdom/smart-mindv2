@@ -1,8 +1,10 @@
 # Swarm Mind
 
-**Multi-agent AI with verifiable independent convergence — built on EigenDA**
+**Multi-agent AI with verifiable independent convergence — built on EigenDA, BitTorrent DHT, and a content-addressed Wasm state machine**
 
-Three autonomous agents reason over real NASA science data in complete isolation. Before any of them sees each other's work, each seals its findings cryptographically to EigenDA. After all three reveal, anyone can prove the convergence was independent — not copied.
+Three autonomous agents reason over real NASA science data in complete isolation. Before any of them sees each other's work, each seals its findings cryptographically. After all three reveal, anyone can prove the convergence was independent — not copied.
+
+No coordinator. No central server. Agents discover each other over BitTorrent Mainline DHT and derive their current phase from the same content-addressed Wasm binary loaded independently by each process. Identical clock, identical rules, zero shared infrastructure.
 
 ---
 
@@ -49,7 +51,7 @@ Run the system and hit `/api/evidence`. This is real output from a completed cyc
 }
 ```
 
-Every check is live — the coordinator fetches each blob from EigenDA, hashes it, and compares against the registered `sealedBlobHash`. `passed: true` means the retrieved content matches exactly what was committed. `independentBeforeReveal: true` means the blob was sealed to Ethereum before the reveal window opened.
+Every check is live — each agent fetches peers' blobs from EigenDA, hashes them, and compares against the registered `sealedBlobHash`. `passed: true` means the retrieved content matches exactly what was committed. `independentBeforeReveal: true` means the blob was sealed before the reveal window opened, as determined by the shared Wasm clock.
 
 ---
 
@@ -154,16 +156,26 @@ The only reliable fix is architectural: **enforce silence before commitment**. I
 ## Architecture
 
 ```
-╔═══════════════════════════════════════════════════════════════════════╗
-║             COORDINATOR + DASHBOARD  (port 3001)                     ║
-║   Manages objective phase clock. Agents poll /api/coordinator        ║
-║   Phase: explore → commit → reveal → synthesis → explore             ║
-╠═══════════════════╦═══════════════════╦═══════════════════════════════╣
-║   KEPLER (3002)   ║   HUBBLE  (3003)  ║   VOYAGER (3004)             ║
-║   Observer        ║   Synthesizer     ║   Analyst                    ║
-║   High curiosity  ║   High sociability║   High diligence/boldness     ║
-╚═══════════════════╩═══════════════════╩═══════════════════════════════╝
-                              ↕ EigenDA Proxy (port 4242)
+┌─────────────────────────────────────────────────────────────────────┐
+│                    phase-machine.wasm  (sha256: 595f95e8…)          │
+│   content-addressed — each agent loads the same binary independently │
+│   computePhase(Date.now()) → explore | commit | reveal | synthesis   │
+│   same binary + same wall-clock = same phase, zero coordination      │
+└───────────────────────┬─────────────────────────────────────────────┘
+                        │ loaded by each agent at startup
+         ┌──────────────┼──────────────┐
+         ▼              ▼              ▼
+┌────────────────┐ ┌────────────────┐ ┌────────────────┐
+│ KEPLER  :3002  │ │ HUBBLE  :3003  │ │ VOYAGER :3004  │
+│ Observer       │ │ Synthesizer    │ │ Analyst        │
+│ DHT :4002      │ │ DHT :4003      │ │ DHT :4004      │
+└───────┬────────┘ └───────┬────────┘ └───────┬────────┘
+        └──────────────────┴──────────────────┘
+             BitTorrent Mainline DHT (BEP 5)
+             peer discovery — no registry
+                        ↕
+               EigenDA Proxy :4242
+      (SHA-256 fallback when Docker unavailable)
 ```
 
 ### Phase 1: EXPLORE (silence)
@@ -174,31 +186,33 @@ This is where independent thought forms. The diversity that makes aggregation me
 
 ### Phase 2: COMMIT (one step, synchronous)
 
-The coordinator's commit window opens. Each agent:
+The Wasm clock transitions to commit. Each agent independently computes the same phase boundary from `Date.now()` without communicating. Each agent:
 
-1. Constructs a `SealedBlob`: every content hash produced during exploration, the agent's Ed25519 public key, the EigenCompute TEE instance ID, and an `independenceProof` — an Ed25519 signature over `agentId | eigenDAReferenceBlock | sha256(sortedContentHashes)`
+1. Constructs a `SealedBlob`: every content hash produced during exploration, the agent's Ed25519 public key, and an `independenceProof` — an Ed25519 signature over `agentId | sha256(sortedContentHashes)`
 2. **Disperses the complete sealed blob to EigenDA** — the full blob including the independence proof is what gets stored and KZG-committed, so `sha256(retrieved blob) == sealedBlobHash` is verifiable by anyone
-3. Receives a KZG commitment and the batch's **Ethereum reference block number** (objective timestamp, not local clock)
-4. Registers `{ kzgHash, eigenDABatchId, eigenDAReferenceBlock, sealedBlobHash }` with the coordinator
-
-The `eigenDAReferenceBlock` is the objective anchor. It is the Ethereum block number at which the EigenDA batch containing this blob was finalized. No agent controls this number; it is determined by Ethereum consensus.
+3. Receives a KZG commitment (SHA-256 fallback when EigenDA proxy unavailable)
+4. Broadcasts `{ kzgHash, sealedBlobHash }` to peers discovered via DHT
 
 ### Phase 3: REVEAL (gossip)
 
-The coordinator opens the reveal window — one block after the commit window closes, making `eigenDAReferenceBlock < commitWindowCloseBlock` provably true. Agents begin pulling from and pushing to peers. Every pheromone emitted in this phase carries `preCommitRef` — a pointer back to the sealed blob's commitment hash.
+The Wasm clock opens the reveal window. Agents begin pulling from and pushing to peers over direct HTTP connections to the URLs learned from DHT. Every pheromone emitted in this phase carries `preCommitRef` — a pointer back to the sealed blob's commitment hash.
 
 ### Phase 4: SYNTHESIS
 
-The coordinator opens the synthesis window. Each agent generates a `CollectiveMemory` containing a full LLM-written research report with `preCommitProofs` — the commitment hashes of all three agents. The coordinator resets to EXPLORE, beginning the next cycle.
+The Wasm clock opens the synthesis window. Each agent independently generates a `CollectiveMemory` — a full LLM-written research report with `preCommitProofs` — then the clock resets to EXPLORE for the next cycle.
 
-### Why coordinator-driven instead of density-based
+### Why Wasm wall-clock instead of a coordinator
 
-The previous version used a local pheromone density heuristic: when density exceeded a threshold, each agent independently declared phase transition. This had a fundamental verifiability problem — "density" is a local variable computed differently by each agent, with no external reference. A verifier cannot reconstruct what density each agent observed or why they fired at a particular moment.
+The previous version polled a coordinator server for phase transitions. This reintroduced a central point of failure and trust: agents had to trust the coordinator's clock and couldn't verify it was running the same rules. A verifier had to trust the coordinator logs.
 
-The coordinator-driven approach replaces this with a wall-clock timer that all agents poll. Phase boundaries are now:
-- **Objective**: any external observer can verify when each window opened and closed
-- **Consistent**: all agents react to the same phase signal
-- **Auditable**: the coordinator logs commit registrations with coordinator-side timestamps (not agent-claimed timestamps)
+The Wasm state machine replaces this with a content-addressed binary:
+
+- **Same binary = same rules**: `sha256(phase-machine.wasm) = 595f95e83e05c0fc1b316dd23ab3368735b1cb1cd5c4a34159adec95ba5574ca`. Any agent can verify it loaded the right module before trusting its phase output.
+- **Deterministic**: `computePhase(nowMs, exploreMs, commitMs, revealMs, synthMs)` is pure arithmetic — no I/O, no state, no network. Given the same inputs, all agents get the same output.
+- **No trust required**: the coordinator was trusted infrastructure. The Wasm binary is a verifiable artifact — operators can inspect `phase-machine.wat` and compile it themselves.
+- **No single point of failure**: killing a coordinator kills all coordination. The Wasm clock is local to each process; no process can disrupt another's phase view.
+
+Phase boundaries are objective in the same sense they were before — wall-clock Unix time is a shared reference — but now enforced by an auditable, content-addressed program rather than a server.
 
 ---
 
@@ -367,114 +381,124 @@ Clinical trial pre-registration is commit-reveal applied to hypothesis formation
 
 ## Running Locally
 
-**Prerequisites:** Node.js 20+, Docker
+**Prerequisites:** Node.js 20+, Docker (optional — SHA-256 fallback works without it)
 
 ```bash
 git clone https://github.com/owizdom/swarm-mindv2
 cd swarm-mindv2
 cp .env.example .env
-# Optional: add LLM API key for AI synthesis (works without one)
-# NASA_API_KEY=DEMO_KEY is included and works at 30 req/hr
+# Set LLM_PROVIDER=anthropic and ANTHROPIC_API_KEY for AI synthesis
+# NASA_API_KEY=DEMO_KEY is included (30 req/hr free; get a key at api.nasa.gov for 1000/hr)
 
 npm install
-npm run build
+npm run build   # tsc + copies phase-machine.wasm to dist/
 npm run start:multi
 ```
 
 `npm run start:multi` runs `start-local.sh` which:
-1. Pulls and starts the EigenDA proxy (memstore, no wallet needed) on port 4242
-2. Starts the coordinator + dashboard on port 3001
-3. Starts agents Kepler, Hubble, Voyager on ports 3002–3004 with `COORDINATOR_URL` and `EIGENDA_PROXY_URL` set
+1. Kills any stale processes on ports 3001–3004 and 4002–4004
+2. Pulls and starts the EigenDA proxy (memstore, no wallet needed) on port 4242
+3. Starts the dashboard (read-only observer) on port 3001
+4. Starts agents Kepler, Hubble, Voyager on ports 3002–3004
+
+Kepler bootstraps the local DHT mesh on port 4002. Hubble and Voyager join via `DHT_BOOTSTRAP=127.0.0.1:4002`. Within ~10 seconds all three agents find each other and begin the commit-reveal cycle — no registry, no handshake beyond the DHT announce.
 
 **Dashboard:** `http://localhost:3001`
-**Evidence bundle:** `http://localhost:3001/api/evidence`
-**Coordinator state:** `http://localhost:3001/api/coordinator`
+**Agent attestation:** `http://localhost:3002/attestation` (and :3003, :3004)
 
 Without Docker, commitments fall back to `sha256:` hashes. The protocol is identical; the trust assumption changes — a sha256 hash has no retrievability guarantee or external timestamp.
+
+### Verify the Wasm binary
+
+```bash
+# All agents log this at startup — hashes must match across all three
+# [WasmPhase] hash = 595f95e83e05c0fc1b316dd23ab3368735b1cb1cd5c4a34159adec95ba5574ca
+
+# Recompile from source and verify yourself:
+npm run compile:wasm
+shasum -a 256 agents/phase-machine.wasm
+# Must equal: 595f95e83e05c0fc1b316dd23ab3368735b1cb1cd5c4a34159adec95ba5574ca
+```
 
 ### Watch the cycle
 
 ```bash
-# Follow coordinator phase in real time
-watch -n2 'curl -s http://localhost:3001/api/coordinator | jq "{cycle: .cycleNumber, phase: .phase, window: .windowRemainingMs, commits: .commitCount}"'
+# Follow agent phase in real time (Wasm-derived — no coordinator needed)
+watch -n2 'curl -s http://localhost:3002/attestation | jq "{phase: .cyclePhase, cycle: .wasmCycle, wasm: .wasmPhaseModule}"'
 
-# Watch the evidence bundle fill in
-watch -n5 'curl -s http://localhost:3001/api/evidence | jq "{cycle: .cycleNumber, committed: .allCommitted, independent: .allIndependentBeforeReveal, integrityPassed: [.integrityChecks[].passed]}"'
+# Watch all three agents' phases simultaneously
+watch -n2 'for p in 3002 3003 3004; do curl -s http://localhost:$p/attestation | jq "{port: '$p', phase: .cyclePhase, cycle: .wasmCycle}"; done'
 
 # Follow agent thoughts as they form
 watch -n3 'curl -s http://localhost:3002/thoughts | jq ".[0] | {conclusion, confidence}"'
+
+# Watch DHT peer discovery
+watch -n5 'curl -s http://localhost:3002/attestation | jq ".dhtPeers"'
 ```
 
 ### Verify a cycle manually
 
 ```bash
-# Step 1: Get the full evidence bundle (persists across cycles)
-curl http://localhost:3001/api/evidence | jq '{
-  cycle: .cycleNumber,
-  allCommitted: .allCommitted,
-  allIndependent: .allIndependentBeforeReveal,
-  integrityChecks: [.integrityChecks[] | {agent: .agentName, passed: .passed}],
-  commits: [.commitments[] | {agent: .agentName, block: .eigenDAReferenceBlock}]
-}'
+# Step 1: Check each agent's Wasm phase — all three must show the same cycle number
+for p in 3002 3003 3004; do
+  curl -s http://localhost:$p/attestation | jq '{port: '$p', phase: .cyclePhase, cycle: .wasmCycle, wasm: .wasmPhaseModule}'
+done
 
-# Step 2: Retrieve a sealed blob from EigenDA and inspect it
-COMMITMENT=$(curl -s http://localhost:3002/commit | jq -r '.commitmentHash' | sed 's/eigenda://')
-curl "http://localhost:4242/get/$COMMITMENT" | jq '{
+# Step 2: Retrieve a sealed blob and inspect it
+COMMITMENT=$(curl -s http://localhost:3002/commit | jq -r '.commitmentHash' | sed 's/sha256://' | sed 's/eigenda://')
+curl -s "http://localhost:4242/get/$COMMITMENT" | jq '{
   agent:    .agentName,
   sealedAt: .explorationEndedAt,
-  block:    .eigenDAReferenceBlock,
   topics:   .topicsCovered,
   findings: (.findings | length),
   proof:    .independenceProof[:80]
 }'
 
-# Step 3: Manually verify integrity
-curl -s "http://localhost:4242/get/$COMMITMENT" -o blob.bin
-openssl dgst -sha256 blob.bin
-# Compare against sealedBlobHash in /api/evidence — they must match
+# Step 3: Manually verify integrity (SHA-256 fallback)
+# sealedBlobHash is in the agent's /commit response
+curl -s http://localhost:3002/commit | jq '{hash: .sealedBlobHash, commitment: .commitmentHash}'
 
 # Step 4: Read the collective report
-curl http://localhost:3001/api/collective | jq '.[0] | {
+curl -s http://localhost:3002/collective | jq '.[0] | {
   preCommitProofs,
   overview:    .report.overview,
   keyFindings: .report.keyFindings,
   verdict:     .report.verdict
 }'
 
-# Step 5: Check for slash events (agents that missed commit window)
-curl http://localhost:3001/api/coordinator | jq '.slashEventCount, .slashEvents'
+# Step 5: Confirm all three agents show same Wasm module hash
+for p in 3002 3003 3004; do
+  curl -s http://localhost:$p/attestation | jq -r '":'+$p+' wasm=" + .wasmPhaseModule'
+done
+# All three must print the same hash prefix
 ```
 
 ---
 
 ## API Reference
 
-### Coordinator (port 3001)
+### Dashboard (port 3001 — read-only observer)
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/coordinator` | GET | Current cycle phase, window timer, commit registry, slash events |
-| `/api/coordinator/commit` | POST | Register commitment (called by agents during commit window) |
-| `/api/coordinator/synthesis` | POST | Notify coordinator of synthesis report (called by agents) |
-| `/api/evidence` | GET | Machine-verifiable evidence bundle — live integrity checks, independence checks |
-| `/api/state` | GET | Aggregated swarm state including coordinator info |
-| `/api/commitments` | GET | All agent commitments from current/last cycle |
-| `/api/attestations` | GET | Agent attestations enriched with commit-reveal data |
-| `/api/collective` | GET | Collective memories with `preCommitProofs` |
-| `/api/thoughts` | GET | All agent thoughts, merged and sorted |
-| `/api/pheromones` | GET | All pheromones in channel |
+| Endpoint | Description |
+|----------|-------------|
+| `/api/state` | Aggregated swarm state polled from all three agents |
+| `/api/attestations` | Agent attestations merged from :3002–3004 |
+| `/api/collective` | Collective memories aggregated from all agents |
+| `/api/thoughts` | All agent thoughts, merged and sorted |
+| `/api/pheromones` | All pheromones in channel |
+| `/api/evidence` | Evidence bundle assembled from per-agent `/evidence` endpoints |
 
 ### Per-agent (ports 3002–3004)
 
 | Endpoint | Description |
 |----------|-------------|
-| `/commit` | Agent's current commitment with eigenDA batch info and peer commitments |
-| `/evidence` | Agent-local view of all known commitments |
-| `/attestation` | Full agent attestation: identity, compute, DA status, stats |
+| `/attestation` | Full agent attestation: identity, Wasm phase module hash, DHT peers, stats |
+| `/commit` | Agent's current commitment hash and sealed blob hash |
+| `/evidence` | Agent-local view of all known peer commitments |
 | `/pheromones` | Agent's local pheromone channel |
 | `/thoughts` | Agent's thoughts (last 50) |
 | `/collective` | Collective memories generated by this agent |
-| `/state` | Full agent state including cycle phase, commitment hash |
+| `/state` | Full agent state including Wasm cycle phase and commitment hash |
 | `/identity` | Ed25519 public key and fingerprint |
 | `/health` | LLM rate limit status |
 
@@ -487,29 +511,35 @@ curl http://localhost:3001/api/coordinator | jq '.slashEventCount, .slashEvents'
 LLM_PROVIDER=anthropic        # anthropic | openai | eigenai
 ANTHROPIC_API_KEY=sk-ant-...
 ANTHROPIC_MODEL=claude-opus-4-6
+# Note: free-tier Anthropic is 5 req/min — 3 agents will hit this limit.
+# Tier 1 (any paid usage) raises to 50 req/min which works comfortably.
 
 # ── NASA (DEMO_KEY = free, 30 req/hr) ──
 NASA_API_KEY=DEMO_KEY
+# Get a free key at api.nasa.gov for 1,000 req/hr
 
 # ── EigenDA ──
 EIGENDA_ENABLED=true
 EIGENDA_PROXY_URL=http://localhost:4242
+# Without Docker: commitments use sha256: fallback automatically
 
-# ── Coordinator ──
-DASHBOARD_PORT=3001
-COORDINATOR_URL=http://localhost:3001   # agents poll this for objective phase
+# ── Cycle timing (passed to Wasm computePhase at runtime) ──
+EXPLORE_MS=30000     # 30s of silence — independent analysis window
+COMMIT_MS=6000       # 6s — agents seal and broadcast commitments
+REVEAL_MS=24000      # 24s — gossip, cross-pollination
+SYNTHESIS_MS=12000   # 12s — LLM collective report, then next cycle
 
-# ── Cycle timing ──
-EXPLORE_STEPS=12          # steps of silence before commit (12 × 2s = 24s)
-SYNC_INTERVAL_MS=2000     # step interval
-# Commit window:    4 steps  (8s)  — agents disperse blob + register
-# Reveal window:   16 steps (32s)  — gossip + cross-pollination
-# Synthesis window: 8 steps (16s)  — collective report, then auto-reset
+# ── DHT peer discovery ──
+# Set per-agent in start-local.sh (not in .env):
+# DHT_PORT=4002           # UDP port for BitTorrent DHT
+# NETWORK_ID=swarm-mind-v2  # infohash namespace
+# DHT_BOOTSTRAP=127.0.0.1:4002  # Hubble + Voyager bootstrap from Kepler
 
 # ── Swarm dynamics ──
 PHEROMONE_DECAY=0.12
 CRITICAL_DENSITY=0.55
 TOKEN_BUDGET_PER_AGENT=50000
+SYNC_INTERVAL_MS=2000
 ```
 
 ---
@@ -560,6 +590,12 @@ TOKEN_BUDGET_PER_AGENT=50000
 
 - **Intel SGX**: Costan, V., & Devadas, S. (2016). Intel SGX Explained. *IACR ePrint* 2016/086.
 
+### Peer-to-peer and Wasm
+
+- **BitTorrent DHT (BEP 5)**: Loewenstern, A. & Norberg, A. (2008). *DHT Protocol.* bittorrent.org/beps/bep_0005.html — Kademlia-based distributed hash table used for peer discovery without a central tracker.
+
+- **WebAssembly**: Haas, A., et al. (2017). Bringing the Web up to Speed with WebAssembly. *PLDI 2017.* — Used here as a content-addressed, deterministic computation substrate for the shared phase state machine.
+
 ---
 
-*Built on EigenLayer (EigenDA + EigenCompute) and the NASA Open APIs.*
+*Built on EigenLayer (EigenDA), BitTorrent Mainline DHT, a content-addressed Wasm state machine, and the NASA Open APIs.*

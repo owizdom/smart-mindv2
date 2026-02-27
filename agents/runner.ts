@@ -29,6 +29,8 @@ import { initDatabase, saveAgent, savePheromone, saveThought, saveCommitment, sa
 import { initThinker, getTotalTokensUsed, generateCollectiveReport, getLLMUsage } from "./thinker";
 import { isEnabled as eigenDAEnabled, disperseBlob } from "./eigenda";
 import { verifyAttestation, buildAttestation } from "./keystore";
+import { initDHT, getDiscoveredPeers, getDHTStatus, stopDHT } from "./dht";
+import { initPhaseMachine, computePhase, getModuleHash } from "./clock-phase";
 import type { Pheromone, PheromoneChannel, LLMConfig, CollectiveMemory, SealedBlob, AgentCommitment, CyclePhase, FindingSummary } from "./types";
 import { v4 as uuid } from "uuid";
 import { hash } from "./types";
@@ -37,16 +39,29 @@ import crypto from "crypto";
 // ── Config from environment ──
 const AGENT_INDEX      = parseInt(process.env.AGENT_INDEX  || "0");
 const AGENT_PORT       = parseInt(process.env.AGENT_PORT   || String(3001 + AGENT_INDEX));
-const PEER_URLS        = (process.env.PEER_URLS || "").split(",").filter(Boolean);
+const DHT_PORT         = parseInt(process.env.DHT_PORT     || String(AGENT_PORT + 1000));
+const NETWORK_ID       = process.env.NETWORK_ID            || "swarm-mind-v2";
+const DHT_BOOTSTRAP    = (process.env.DHT_BOOTSTRAP || "").split(",").filter(Boolean);
+// Static seed peers (optional — DHT replaces the need for these)
+const STATIC_PEER_URLS = (process.env.PEER_URLS || "").split(",").filter(Boolean);
 const DB_PATH          = process.env.DB_PATH || path.join(process.cwd(), `swarm-agent-${AGENT_INDEX}.db`);
 const STEP_INTERVAL    = parseInt(process.env.SYNC_INTERVAL_MS || "2000");
 const PHEROMONE_DECAY  = parseFloat(process.env.PHEROMONE_DECAY || "0.12");
 const CRITICAL_DENSITY = parseFloat(process.env.CRITICAL_DENSITY || "0.55");
 const TOKEN_BUDGET     = parseInt(process.env.TOKEN_BUDGET_PER_AGENT || "500000");
 const EXPLORE_STEPS    = parseInt(process.env.EXPLORE_STEPS || "20");
-// Coordinator URL — dashboard server acts as the objective phase coordinator.
-// Agents poll this for phase instead of computing density locally.
-const COORDINATOR_URL  = process.env.COORDINATOR_URL || "";
+
+// ── Phase durations (ms) — must match across all agents ──
+const EXPLORE_MS   = EXPLORE_STEPS * STEP_INTERVAL;       // default 40 s
+const COMMIT_MS    = 4  * STEP_INTERVAL;                  // default  8 s
+const REVEAL_MS    = 16 * STEP_INTERVAL;                  // default 32 s
+const SYNTHESIS_MS = 8  * STEP_INTERVAL;                  // default 16 s
+
+/** Returns all known peer HTTP URLs — static seeds + DHT-discovered */
+function getPeerUrls(): string[] {
+  const dht = getDiscoveredPeers();
+  return [...new Set([...STATIC_PEER_URLS, ...dht])];
+}
 
 // ── Init ──
 initDatabase(DB_PATH);
@@ -97,7 +112,7 @@ let explorePhaseEndStep = EXPLORE_STEPS;
 const agentCommitments = new Map<string, AgentCommitment>();
 const explorePheromones: Pheromone[] = [];
 let synthesisFiredThisCycle = false;  // prevents double-firing synthesis per cycle
-let lastCoordPhase: CyclePhase = "explore"; // tracks last known coordinator phase
+let lastClockCycle = -1;              // detects cycle rollover from Wasm state machine
 
 // ── Collective report generation (triggered at phase transition) ──
 async function generateCollectiveMemory(
@@ -183,63 +198,6 @@ async function generateCollectiveMemory(
     console.error(`  [${agent.state.name}] Collective report error:`, err);
     return null;
   }
-}
-
-// ── Coordinator polling ──────────────────────────────────────────────────
-
-interface CoordState {
-  phase: CyclePhase;
-  cycleId: string;
-  cycleNumber: number;
-  windowRemainingMs: number;
-  commitCount: number;
-}
-
-async function pollCoordinator(): Promise<CoordState | null> {
-  if (!COORDINATOR_URL) return null;
-  try {
-    const res = await fetch(`${COORDINATOR_URL}/api/coordinator`, {
-      signal: AbortSignal.timeout(1500),
-    });
-    if (!res.ok) return null;
-    return await res.json() as CoordState;
-  } catch {
-    return null;
-  }
-}
-
-async function registerCommitWithCoordinator(commitment: AgentCommitment, eigenDABatchId: string | null, eigenDAReferenceBlock: number | null): Promise<void> {
-  if (!COORDINATOR_URL) return;
-  try {
-    await fetch(`${COORDINATOR_URL}/api/coordinator/commit`, {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({
-        agentId:              commitment.agentId,
-        agentName:            commitment.agentName,
-        kzgHash:              commitment.commitmentHash,
-        eigenDABatchId,
-        eigenDAReferenceBlock,
-        sealedBlobHash:       commitment.sealedBlobHash,
-        committedViaEigenDA:  commitment.committedViaEigenDA,
-      }),
-      signal: AbortSignal.timeout(3000),
-    });
-  } catch (err) {
-    console.warn(`  [${agent.state.name}] Coordinator commit registration failed: ${err instanceof Error ? err.message.slice(0, 60) : String(err)}`);
-  }
-}
-
-async function notifySynthesis(report: unknown): Promise<void> {
-  if (!COORDINATOR_URL) return;
-  try {
-    await fetch(`${COORDINATOR_URL}/api/coordinator/synthesis`, {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({ report }),
-      signal:  AbortSignal.timeout(2000),
-    });
-  } catch { /* non-critical */ }
 }
 
 // ── Commit phase: seal findings to EigenDA ──
@@ -352,10 +310,9 @@ async function performCommit(): Promise<void> {
   agentCommitments.set(agent.state.id, ownCommitment);
   try { saveCommitment(ownCommitment); } catch {}
 
-  // Register with coordinator (objective record) + broadcast to peers (gossip fallback)
-  await registerCommitWithCoordinator(ownCommitment, eigenDABatchId, eigenDAReferenceBlock);
+  // Broadcast commitment to all known peers (no coordinator — DHT provides discovery)
   await Promise.allSettled(
-    PEER_URLS.map(url => fetch(`${url}/commit`, {
+    getPeerUrls().map(url => fetch(`${url}/commit`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body:   JSON.stringify(ownCommitment), signal: AbortSignal.timeout(3000),
     }))
@@ -371,7 +328,7 @@ async function performCommit(): Promise<void> {
 // ── Gossip: push to peers ──
 async function pushToPeers(pheromone: Pheromone): Promise<void> {
   await Promise.allSettled(
-    PEER_URLS.map(url =>
+    getPeerUrls().map(url =>
       fetch(`${url}/pheromone`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -385,7 +342,7 @@ async function pushToPeers(pheromone: Pheromone): Promise<void> {
 // ── Gossip: pull from peers ──
 async function pullFromPeers(): Promise<void> {
   const results = await Promise.allSettled(
-    PEER_URLS.map(url =>
+    getPeerUrls().map(url =>
       fetch(`${url}/pheromones`, { signal: AbortSignal.timeout(3000) })
         .then(r => r.json() as Promise<Pheromone[]>)
     )
@@ -603,7 +560,8 @@ app.get("/state", (_, res) => {
     knowledgeCount: agent.state.knowledge.length,
     step,
     eigenDAEnabled: eigenDAEnabled(),
-    peerCount:      PEER_URLS.length,
+    peerCount:      getPeerUrls().length,
+    dhtPeers:       getDiscoveredPeers(),
     llmReady,
     density:                  channel.density,
     criticalThreshold:        channel.criticalThreshold,
@@ -739,7 +697,7 @@ app.get("/evidence", (_, res) => {
         ? `${proxyUrl}/get/${c.commitmentHash.replace("eigenda:", "")}`
         : null,
     })),
-    coordinatorUrl: COORDINATOR_URL || null,
+    wasmPhaseModule: getModuleHash().slice(0, 16) + "…",
   });
 });
 
@@ -761,10 +719,20 @@ app.listen(AGENT_PORT, () => {
   console.log(`╠══════════════════════════════════════════════╣`);
   console.log(`║  Port:        ${String(AGENT_PORT).padEnd(30)} ║`);
   console.log(`║  Identity:    ${agent.state.identity.fingerprint.padEnd(30)} ║`);
-  console.log(`║  Peers:       ${String(PEER_URLS.length).padEnd(30)} ║`);
+  console.log(`║  DHT port:    ${String(DHT_PORT).padEnd(30)} ║`);
+  console.log(`║  Network:     ${NETWORK_ID.padEnd(30)} ║`);
+  console.log(`║  Peers:       ${("dht" + (STATIC_PEER_URLS.length ? `+${STATIC_PEER_URLS.length} static` : "")).padEnd(30)} ║`);
   console.log(`║  EigenDA:     ${String(eigenDAEnabled()).padEnd(30)} ║`);
   console.log(`║  LLM:         ${String(llmReady).padEnd(30)} ║`);
   console.log(`╚══════════════════════════════════════════════╝\n`);
+
+  // Start DHT peer discovery after HTTP server is up
+  initDHT({
+    httpPort:  AGENT_PORT,
+    dhtPort:   DHT_PORT,
+    networkId: NETWORK_ID,
+    bootstrap: DHT_BOOTSTRAP.length > 0 ? DHT_BOOTSTRAP : undefined,
+  }).catch(err => console.warn("[DHT] Init failed:", err.message));
 });
 
 // ── Cycle reset helper ──
@@ -787,7 +755,6 @@ function resetCycle(): void {
   channel.cyclePhase        = "explore";
   channel.phaseStartStep    = step;
   synthesisFiredThisCycle   = false;
-  lastCoordPhase            = "explore";
   channel.phaseTransitionOccurred = true;
   channel.transitionStep    = step;
   setTimeout(() => {
@@ -801,75 +768,50 @@ async function run(): Promise<void> {
   while (true) {
     step++;
 
-    // ── Coordinator-driven phase management ──────────────────────────────
-    // Poll coordinator for the objective current phase. If coordinator is
-    // unavailable, fall back to local step counter + density detection.
-    const coordState = await pollCoordinator();
+    // ── Wasm clock-phase management ──────────────────────────────────────
+    // computePhase() calls the content-addressed Wasm state machine with
+    // the current wall-clock time. Every agent running the same binary
+    // derives the same phase at the same moment — no coordinator required.
+    const clock = computePhase(Date.now(), EXPLORE_MS, COMMIT_MS, REVEAL_MS, SYNTHESIS_MS);
+    const clockPhase = clock.phase;
 
-    if (coordState) {
-      const coordPhase = coordState.phase as CyclePhase;
+    // New cycle detected — reset local state for the fresh explore window
+    if (clock.cycleNumber !== lastClockCycle && lastClockCycle !== -1) {
+      console.log(`  [${agent.state.name}] ⟳  Wasm cycle ${clock.cycleNumber} begins (module ${getModuleHash().slice(0, 8)}…)`);
+      resetCycle();
+    }
+    lastClockCycle = clock.cycleNumber;
 
-      // Coordinator phase changed — react accordingly
-      if (coordPhase !== lastCoordPhase) {
-        console.log(`  [${agent.state.name}] Coordinator: ${lastCoordPhase} → ${coordPhase} (cycle ${coordState.cycleNumber})`);
-        lastCoordPhase = coordPhase;
+    // Phase transition: only act on forward changes within this cycle
+    if (clockPhase !== cyclePhase) {
 
-        if (coordPhase === "commit" && cyclePhase === "explore") {
-          // Coordinator opened the commit window — seal our findings
-          cyclePhase         = "commit";
-          channel.cyclePhase = "commit";
-          await performCommit(); // → sets cyclePhase = "reveal"
-
-        } else if (coordPhase === "reveal" && cyclePhase !== "reveal") {
-          // Coordinator opened reveal window — start gossiping
-          cyclePhase         = "reveal";
-          channel.cyclePhase = "reveal";
-
-        } else if (coordPhase === "synthesis" && !synthesisFiredThisCycle) {
-          // Coordinator opened synthesis window — generate collective memory
-          synthesisFiredThisCycle = true;
-          console.log(`\n${"█".repeat(50)}`);
-          console.log(`█  [${agent.state.name}] SYNTHESIS — coordinator cycle ${coordState.cycleNumber}`);
-          console.log(`█  Commits: ${coordState.commitCount} | Pheromones: ${channel.pheromones.length}`);
-          console.log(`${"█".repeat(50)}\n`);
-
-          const proofSnapshot = Object.fromEntries(
-            [...agentCommitments.entries()].map(([id, c]) => [id, c.commitmentHash])
-          );
-          generateCollectiveMemory(proofSnapshot)
-            .then(report => notifySynthesis(report))
-            .catch(() => {});
-
-        } else if (coordPhase === "explore" && cyclePhase !== "explore") {
-          // Coordinator reset to explore — new cycle begins
-          resetCycle();
-        }
-      }
-    } else {
-      // ── Fallback: local phase management when coordinator unreachable ──
-      // Commit trigger: fire once when explore window ends
-      if (cyclePhase === "explore" && step >= explorePhaseEndStep) {
+      if (clockPhase === "commit" && cyclePhase === "explore") {
+        console.log(`  [${agent.state.name}] Wasm: explore → commit  (${clock.phaseRemainingMs}ms window)`);
         cyclePhase         = "commit";
         channel.cyclePhase = "commit";
-        await performCommit();
-      }
+        await performCommit(); // advances cyclePhase to "reveal" internally
 
-      // Synthesis trigger: density threshold during reveal phase
-      if (cyclePhase === "reveal" && !synthesisFiredThisCycle && step >= noTransitionBeforeStep) {
-        const synced = channel.pheromones.filter(p => p.strength > 0.4).length;
-        if (channel.density >= channel.criticalThreshold && synced >= 3) {
-          synthesisFiredThisCycle = true;
-          console.log(`\n${"█".repeat(50)}`);
-          console.log(`█  [${agent.state.name}] PHASE TRANSITION (local fallback) — step ${step}`);
-          console.log(`█  Density: ${channel.density.toFixed(3)} | Pheromones: ${channel.pheromones.length}`);
-          console.log(`${"█".repeat(50)}\n`);
+      } else if (clockPhase === "reveal" && cyclePhase !== "reveal") {
+        console.log(`  [${agent.state.name}] Wasm: → reveal  (${clock.phaseRemainingMs}ms window)`);
+        cyclePhase         = "reveal";
+        channel.cyclePhase = "reveal";
 
-          const proofSnapshot = Object.fromEntries(
-            [...agentCommitments.entries()].map(([id, c]) => [id, c.commitmentHash])
-          );
-          generateCollectiveMemory(proofSnapshot).catch(() => {});
-          resetCycle();
-        }
+      } else if (clockPhase === "synthesis" && !synthesisFiredThisCycle) {
+        synthesisFiredThisCycle = true;
+        console.log(`\n${"█".repeat(50)}`);
+        console.log(`█  [${agent.state.name}] SYNTHESIS — Wasm cycle ${clock.cycleNumber}`);
+        console.log(`█  Commits: ${agentCommitments.size} | Pheromones: ${channel.pheromones.length}`);
+        console.log(`${"█".repeat(50)}\n`);
+
+        const proofSnapshot = Object.fromEntries(
+          [...agentCommitments.entries()].map(([id, c]) => [id, c.commitmentHash])
+        );
+        generateCollectiveMemory(proofSnapshot).catch(() => {});
+
+      } else if (clockPhase === "explore" && cyclePhase !== "explore") {
+        // explore appears after synthesis in a new cycle — handled above by
+        // cycle rollover detection, but guard here in case of clock skew
+        resetCycle();
       }
     }
     // ── End phase management ─────────────────────────────────────────────
@@ -918,7 +860,16 @@ async function run(): Promise<void> {
 }
 
 // Graceful shutdown
-process.on("SIGINT",  () => { try { saveAgent(agent.state); closeDatabase(); } catch {} process.exit(0); });
-process.on("SIGTERM", () => { try { saveAgent(agent.state); closeDatabase(); } catch {} process.exit(0); });
+async function shutdown(): Promise<void> {
+  try { saveAgent(agent.state); closeDatabase(); } catch {}
+  await stopDHT();
+  process.exit(0);
+}
+process.on("SIGINT",  () => void shutdown());
+process.on("SIGTERM", () => void shutdown());
 
-run().catch(err => { console.error("Fatal:", err); process.exit(1); });
+// Await the Wasm phase machine before starting the main loop —
+// computePhase() throws if called before initPhaseMachine() resolves.
+initPhaseMachine().then(() => {
+  run().catch(err => { console.error("Fatal:", err); process.exit(1); });
+}).catch(err => { console.error("[WasmPhase] Fatal:", err.message); process.exit(1); });

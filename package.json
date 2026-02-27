@@ -4,7 +4,8 @@
   "description": "Emergent Swarm Mind — TEE agents that develop collective memory without a leader",
   "main": "dist/agents/swarm.js",
   "scripts": {
-    "build": "tsc",
+    "compile:wasm": "node scripts/compile-wasm.js",
+    "build": "tsc && cp agents/phase-machine.wasm dist/agents/phase-machine.wasm",
     "start": "node dist/agents/swarm.js",
     "start:multi": "bash start-local.sh",
     "start:docker": "docker compose up --build",
@@ -16,12 +17,14 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",
     "better-sqlite3": "^12.6.2",
+    "bittorrent-dht": "^11.0.11",
     "cors": "^2.8.5",
     "dotenv": "^16.4.0",
     "express": "^4.21.0",
     "openai": "^4.73.0",
     "simple-git": "^3.31.1",
     "uuid": "^10.0.0",
+    "wabt": "^1.0.39",
     "ws": "^8.18.0"
   },
   "devDependencies": {
