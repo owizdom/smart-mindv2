@@ -21,7 +21,7 @@ WORKDIR /app
 COPY --from=builder /app/dist         ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
-COPY dashboard/index.html             ./dashboard/index.html
+COPY --from=builder /app/dashboard    ./dashboard
 
 RUN mkdir -p /data
 VOLUME ["/data"]

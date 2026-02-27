@@ -46,7 +46,7 @@ echo ""
 
 # ── Build + push agent image ──────────────────────────────────────────
 echo "==> Building agent image: $IMAGE"
-docker build --platform linux/amd64 -f Dockerfile.agent -t "$IMAGE" .
+docker build --platform linux/amd64 -t "$IMAGE" .
 echo "==> Pushing image: $IMAGE"
 docker push "$IMAGE"
 
@@ -87,7 +87,7 @@ deploy_agent() {
       --environment   "$ENVIRONMENT" \
       --name          "$app_name" \
       --image-ref     "$IMAGE" \
-      --dockerfile    "Dockerfile.agent" \
+      --dockerfile    "Dockerfile" \
       --env-file      "$tmp_env" \
       --instance-type "$INSTANCE_TYPE" \
       --private-key   "$ECLOUD_PRIVATE_KEY" \
