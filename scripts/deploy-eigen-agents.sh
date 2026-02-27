@@ -3,14 +3,17 @@
 #
 # Deploys Kepler, Hubble, and Voyager as independent EigenCloud workloads.
 # Each runs inside its own Intel TDX enclave — hardware-enforced isolation.
-# Agents discover each other via BitTorrent DHT after startup.
+# Agents discover each other automatically via BitTorrent DHT — no peer URL needed.
 #
 # Prerequisites:
 #   export ECLOUD_PRIVATE_KEY=0x...
 #   export IMAGE=docker.io/<you>/swarm-mind-agent:latest
-#   export KEPLER_PEER_URL=https://<kepler-eigencloud-url>  (set after Kepler deploys)
 #
-# Usage:
+# Usage — deploy all 3 at once:
+#   bash scripts/deploy-eigen-agents.sh [path-to-env]
+#
+# Usage — upgrade existing apps:
+#   KEPLER_APP_ID=0x... HUBBLE_APP_ID=0x... VOYAGER_APP_ID=0x... \
 #   bash scripts/deploy-eigen-agents.sh [path-to-env]
 
 set -euo pipefail
@@ -37,6 +40,7 @@ command -v ecloud  >/dev/null || { echo "ecloud CLI required — install from ei
 echo "╔══════════════════════════════════════════════════════════╗"
 echo "║  Swarm Mind — EigenCloud 3-Agent Deploy                  ║"
 echo "║  Each agent gets its own TDX enclave + TEE quote         ║"
+echo "║  Discovery: BitTorrent DHT (no peer URL needed)          ║"
 echo "╚══════════════════════════════════════════════════════════╝"
 echo ""
 
@@ -46,18 +50,18 @@ docker build --platform linux/amd64 -f Dockerfile.agent -t "$IMAGE" .
 echo "==> Pushing image: $IMAGE"
 docker push "$IMAGE"
 
-# ── Helper: deploy one agent instance ────────────────────────────────
+# ── Helper: deploy or upgrade one agent instance ─────────────────────
 deploy_agent() {
   local name="$1"
   local index="$2"
-  local bootstrap="${3:-}"
+  local app_id="${3:-}"   # pass existing app ID to upgrade instead of redeploy
 
   local app_name="swarm-$(echo "$name" | tr '[:upper:]' '[:lower:]')-${RUN_ID}"
 
   echo ""
-  echo "==> Deploying $name (index=$index) as: $app_name"
+  echo "==> Deploying $name (index=$index)"
 
-  # Build env overrides (written to a temp file so ecloud --env-file picks them up)
+  # Merge base env + agent-specific overrides into a temp file
   local tmp_env
   tmp_env="$(mktemp)"
   cp "$ENV_FILE" "$tmp_env"
@@ -67,10 +71,8 @@ deploy_agent() {
     echo "DHT_PORT=4002"
     echo "NETWORK_ID=$NETWORK_ID"
     echo "DB_PATH=/data/swarm-agent.db"
-    [[ -n "$bootstrap" ]] && echo "PEER_URLS=$bootstrap"
+    # No PEER_URLS needed — agents discover each other via public BitTorrent DHT
   } >> "$tmp_env"
-
-  local app_id="${5:-}"
 
   if [[ -n "$app_id" ]]; then
     echo "  → Upgrading existing app $app_id"
@@ -96,33 +98,23 @@ deploy_agent() {
   fi
 
   rm -f "$tmp_env"
-  echo "  ✓ $name deployed: $app_name"
+  echo "  ✓ $name deployed"
 }
 
-# ── Deploy Kepler first (no bootstrap — it becomes the DHT seed) ──────
-deploy_agent "Kepler" 0 ""
+# ── Deploy all 3 agents (or upgrade if app IDs are set) ──────────────
+deploy_agent "Kepler"  0 "${KEPLER_APP_ID:-}"
+deploy_agent "Hubble"  1 "${HUBBLE_APP_ID:-}"
+deploy_agent "Voyager" 2 "${VOYAGER_APP_ID:-}"
 
 echo ""
-echo "┌─────────────────────────────────────────────────────────────┐"
-echo "│  Kepler is live. Get its public URL from EigenCloud, then   │"
-echo "│  set KEPLER_PEER_URL=https://<kepler-url> and re-run this   │"
-echo "│  script with SKIP_KEPLER=1 to deploy Hubble and Voyager.    │"
-echo "└─────────────────────────────────────────────────────────────┘"
-
-if [[ "${SKIP_KEPLER:-0}" == "1" ]]; then
-  : "${KEPLER_PEER_URL:?Set KEPLER_PEER_URL to Kepler's public EigenCloud URL}"
-  deploy_agent "Hubble"  1 "$KEPLER_PEER_URL"
-  deploy_agent "Voyager" 2 "$KEPLER_PEER_URL"
-
-  echo ""
-  echo "══════════════════════════════════════════════════════════════"
-  echo "  All 3 agents deployed on EigenCloud."
-  echo "  Each runs in an isolated TDX enclave."
-  echo "  Agents will discover each other via DHT within ~30 seconds."
-  echo ""
-  echo "  Check TEE attestation quotes:"
-  echo "    curl https://<kepler-url>/attestation | jq .compute"
-  echo "    curl https://<hubble-url>/attestation  | jq .compute"
-  echo "    curl https://<voyager-url>/attestation | jq .compute"
-  echo "══════════════════════════════════════════════════════════════"
-fi
+echo "══════════════════════════════════════════════════════════════"
+echo "  All 3 agents submitted to EigenCloud."
+echo "  Each runs in its own TDX enclave."
+echo ""
+echo "  Agents discover each other via BitTorrent DHT — no setup needed."
+echo "  Discovery takes ~30s after both instances are Running."
+echo ""
+echo "  To upgrade later, set the app IDs and re-run:"
+echo "    KEPLER_APP_ID=0x...  HUBBLE_APP_ID=0x...  VOYAGER_APP_ID=0x... \\"
+echo "    bash scripts/deploy-eigen-agents.sh .env"
+echo "══════════════════════════════════════════════════════════════"

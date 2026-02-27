@@ -22,10 +22,18 @@ COPY --from=builder /app/dist         ./dist
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 COPY dashboard/index.html             ./dashboard/index.html
-COPY scripts/run-eigencloud-multi.sh  ./scripts/run-eigencloud-multi.sh
 
-RUN chmod +x ./scripts/run-eigencloud-multi.sh
-
+RUN mkdir -p /data
 VOLUME ["/data"]
-EXPOSE 3001
-CMD ["./scripts/run-eigencloud-multi.sh"]
+
+# EigenCloud routes external traffic to port 80
+EXPOSE 80
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=10s \
+  CMD node -e "fetch('http://localhost:'+(process.env.AGENT_PORT||80)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
+ENV NODE_ENV=production
+ENV DB_PATH=/data/swarm-agent.db
+ENV AGENT_PORT=80
+
+CMD ["node", "dist/agents/runner.js"]
